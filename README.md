@@ -1,0 +1,2 @@
+# Project Alcyone
+Currently my intentions for this project is to develop an application for web and mobile using Angular2-Meteor and Meteor-RxJS.  And to have this project able to be deployed on Azure using PowerShell. 
