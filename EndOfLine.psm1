@@ -1,4 +1,5 @@
 $SummaryTable = @{}
+
 function ConvertTo-LF {
     [CmdletBinding()]
     Param
@@ -7,14 +8,20 @@ function ConvertTo-LF {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
+        [switch]$SkipIgnoreFile,
+
         [switch]$WhatIf
     )
+
+    if ($SkipIgnoreFile.IsPresent -eq $false) {
+       $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
+    }
 
     $ConfirmationMessage = New-ConfirmationMessage -EOL "LF" -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $True) {
-        Start-ConversionProcess -Path $Path -EOL "LF" -WhatIf:$WhatIf.IsPresent
+        Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
     }
     else {
         Write-Output -InputObject 'Procedure has been cancelled, no files have been modified.'
@@ -29,14 +36,20 @@ function ConvertTo-CRLF {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
+        [switch]$SkipIgnoreFile,
+        
         [switch]$WhatIf
     )
+
+    if ($SkipIgnoreFile.IsPresent -eq $false) {
+       $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
+    }
 
     $ConfirmationMessage = New-ConfirmationMessage -EOL "CRLF" -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $True) {
-        Start-ConversionProcess -Path $Path -EOL "CRLF" -WhatIf:$WhatIf.IsPresent
+        Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
     }
     else {
         Write-Output -InputObject 'Procedure has been cancelled, no files have been modified.'
@@ -75,10 +88,15 @@ function Start-ConversionProcess {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
+        [Parameter(Mandatory = $False)]
+        [string[]]$IgnoreTable,
+
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
         [switch]$WhatIf
+
+
     )
     
     try {
@@ -99,7 +117,7 @@ function Start-ConversionProcess {
         if ($IsContainer -eq $True) {
             Get-ChildItem -Path $Path -Recurse | ForEach-Object -Process {
                 if ($_.PSIsContainer -eq $False) {
-                    Get-FileObject -FilePath $_.FullName -EOL $EOL -WhatIf:$WhatIf.IsPresent | `
+                    Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
                         Write-File  | Write-Summary
                 }
             }
@@ -110,7 +128,8 @@ function Start-ConversionProcess {
         }
 
         Format-SummaryTable -WhatIf:$WhatIf.IsPresent
-        # clear table to be used again in session...
+        # clear tables to be used again in session and free memory...
+        $IgnoreTable = ''
         $SummaryTable.Clear()
     }
     catch [System.IO.DirectoryNotFoundException] {
@@ -191,14 +210,6 @@ function Request-Confirmation {
     $Decision
 }
 
-<#
-.SYNOPSIS
-Set variable in an object for Write-File which is next function in the pipeline
-
-.DESCRIPTION
-Opens StreamReader to set variables for Write-File which is next in the pipeline.  This will
-close StreamReader after all variables are set.
-#>
 function Get-FileObject {
     [CmdletBinding()]
     Param
@@ -209,6 +220,9 @@ function Get-FileObject {
         [Parameter(Mandatory = $True)]
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
+
+        [Parameter(Mandatory = $False)]
+        $IgnoreTable,
         
         [switch]$WhatIf
     )
@@ -218,128 +232,114 @@ function Get-FileObject {
         FileItem             = $null
         FileAsString         = ''
         FileEOL              = ''
+        IgnoredFilePath      = ''
         Encoding             = $null
         EndsWithEmptyNewLine = $false
         WhatIf               = $WhatIf.IsPresent
     }
 
-    $Data.FileItem = Get-Item -Path $FilePath
-
-    New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-Null
-
-    $Data.FileAsString = $StreamReader.ReadToEnd();
-
-    [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
-    [byte]$LF = 0x0A # 10  or  \n    or  `n
-    $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileAsString)
-    $FileAsBytesLength = $FileAsBytes.Length
-
-    $IndexOfLF = $FileAsBytes.IndexOf($LF)
-    if (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -ne $CR)) {
-        $Data.FileEOL = 'LF'
-        if ($FileAsBytesLength) {
-            $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
-            ($FileAsBytes.Get($FileAsBytesLength - 2) -eq $LF)
-        }
-    }
-    elseif (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -eq $CR)) {
-        $Data.FileEOL = 'CRLF'
-        if ($FileAsBytesLength) {
-            $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
-            ($FileAsBytes.Get($FileAsBytesLength - 3) -eq $LF)
+    if ($IgnoreTable.Count) {
+        $Data.FileItem = Get-Item -Path $FilePath -Exclude $IgnoreTable
+        if (!$Data.FileItem) {
+            $Data.IgnoredFilePath = $FilePath
         }
     }
     else {
-        $Data.FileEOL = 'unknown'
+        $Data.FileItem = Get-Item -Path $FilePath
     }
-    
-    $StreamReader.Dispose()
+
+    if ($Data.FileItem) {
+        New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-Null
+
+        $Data.FileAsString = $StreamReader.ReadToEnd();
+        $StreamReader.Dispose()
+
+        [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
+        [byte]$LF = 0x0A # 10  or  \n    or  `n
+        $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileAsString)
+        $FileAsBytesLength = $FileAsBytes.Length
+
+        $IndexOfLF = $FileAsBytes.IndexOf($LF)
+        if (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -ne $CR)) {
+            $Data.FileEOL = 'LF'
+            if ($FileAsBytesLength) {
+                $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
+                ($FileAsBytes.Get($FileAsBytesLength - 2) -eq $LF)
+            }
+        }
+        elseif (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -eq $CR)) {
+            $Data.FileEOL = 'CRLF'
+            if ($FileAsBytesLength) {
+                $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
+                ($FileAsBytes.Get($FileAsBytesLength - 3) -eq $LF)
+            }
+        }
+        else {
+            $Data.FileEOL = 'unknown'
+        }
+    }
 
     $Data
 }
 
-<#
-.SYNOPSIS
-From the variables set from Get-FileObject, Write-File will make logical decisions on what and how the contents 
-are arranged and written to file.
-
-.DESCRIPTION
-Long descriptio
-
-.PARAMETER WhatIf
-If true running in simulation mode
-
-.NOTES
-General notes
-#>
 function Write-File {
     [CmdletBinding()]
     Param
     (
         [Parameter(ValueFromPipeline = $True)]
         [PsObject]$Data
-        <#
-        $Data = [PsObject]@{
-        Header         = $Header
-        FileItem       = $null
-        FileAsString   = ''
-        EOL            = ''
-        Encoding       = $null
-        EndsWithEmptyNewLine = $false
-        Brackets       = ''
-        ToInclude      = $false
-        WhatIf         = $WhatIf.IsPresent }
-        #>
     )
 
     # If running in destructive mode (not in WhatIf) pass just the FullName to StreamWriter.
     # If running in destructive mode then it MUST have $True passed-in as second parameter 
     # which signifies to append.  Otherwise it will delete all contents of file.
-    if (!$Data.WhatIf) {
-        $StreamWriterArguments = $Data.FileItem.FullName
-    }
-    else {
-        $StreamWriterArguments = @($Data.FileItem.FullName, $True)
-    }
-    New-Object -TypeName System.IO.StreamWriter -ArgumentList $StreamWriterArguments -OutVariable StreamWriter | Out-Null
-
-    $Data.Encoding = $StreamWriter.Encoding
-
-    if ($Data.Encoding -is [System.Text.UTF8Encoding]) {
-        # if $Data.EOL equals 'CRLF' we shouldnt have to do anything since 
-        # PowerShell defaults to the same EOL markings (at least on Windows).
-        # but if this file has lone LF endings, edit $HeaderPrependedToFileString
-        # to have just LF endings too. 
-        #
-        # Although the following may be benefical here in some environments:
-        #  $OutputEncoding
-        #  $OFS = $Info.LineEnding
-        #  $StreamWriter.NewLine = $True (although, this is a get/set prop PowerShell
-        #       cant set it)
-        #  $TextWriter.CoreNewLine (StreamWriter inherits from this class)
-        if ($Data.EOL -eq 'LF') {
-            $Data.FileAsString = $Data.FileAsString -replace "`r", ""
-            if ($Data.EndsWithEmptyNewLine) {
-                $Data.FileAsString + "`n"
-            }
+    if ($Data.FileItem) {
+        if (!$Data.WhatIf) {
+            $StreamWriterArguments = $Data.FileItem.FullName
         }
-        elseif ($Data.EOL -eq 'CRLF') {
-            $Data.FileAsString = $Data.FileAsString -replace "`r`n", ""
-            if ($Data.EndsWithEmptyNewLine) {
-                $Data.FileAsString + "`r`n"
-            }
+        else {
+            $StreamWriterArguments = @($Data.FileItem.FullName, $True)
         }
+        New-Object -TypeName System.IO.StreamWriter -ArgumentList $StreamWriterArguments -OutVariable StreamWriter | Out-Null
 
-        try {
-            if (!$Data.WhatIf) {
-                $StreamWriter.Write($Data.FileAsString)
+        $Data.Encoding = $StreamWriter.Encoding
+
+        if ($Data.Encoding -is [System.Text.UTF8Encoding]) {
+            # if $Data.EOL equals 'CRLF' we shouldnt have to do anything since 
+            # PowerShell defaults to the same EOL markings (at least on Windows).
+            # but if this file has lone LF endings, edit $HeaderPrependedToFileString
+            # to have just LF endings too. 
+            #
+            # Although the following may be benefical here in some environments:
+            #  $OutputEncoding
+            #  $OFS = $Info.LineEnding
+            #  $StreamWriter.NewLine = $True (although, this is a get/set prop PowerShell
+            #       cant set it)
+            #  $TextWriter.CoreNewLine (StreamWriter inherits from this class)
+            if ($Data.EOL -eq 'LF') {
+                $Data.FileAsString = $Data.FileAsString -replace "`r", ""
+                if ($Data.EndsWithEmptyNewLine) {
+                    $Data.FileAsString + "`n"
+                }
             }
+            elseif ($Data.EOL -eq 'CRLF') {
+                $Data.FileAsString = $Data.FileAsString -replace "`r`n", ""
+                if ($Data.EndsWithEmptyNewLine) {
+                    $Data.FileAsString + "`r`n"
+                }
+            }
+
+            try {
+                if (!$Data.WhatIf) {
+                    $StreamWriter.Write($Data.FileAsString)
+                }
             
-            $StreamWriter.Flush()
-            $StreamWriter.Close()
-        }
-        catch {
-            Write-Error ("EndOfLine failed to call Dispose() successfully with: " + $Data.FileItem.FullName)
+                $StreamWriter.Flush()
+                $StreamWriter.Close()
+            }
+            catch {
+                Write-Error ("EndOfLine threw an exception when writing to: " + $Data.FileItem.FullName)
+            }
         }
     }
 
@@ -353,30 +353,60 @@ function Write-Summary {
         [Parameter(ValueFromPipeline = $True)]
         [PsObject]$Data
     )
-    # for file that dont have a file extension
-    if ($Data.FileItem.Extension) {
+
+    # for files that dont have a file extension
+    if ($Data.FileItem -and $Data.FileItem.Extension) {
         $SummaryTableKey = $Data.FileItem.Extension
     }
-    else {
+    elseif ($Data.FileItem) {
         $SummaryTableKey = $Data.FileItem.Name
+    }
+    else {
+        if ($Data.IgnoredFilePath -match '\.\w+$') {
+            $SummaryTableKey = $Matches[0]
+        }
     }
 
     if (($Data.Encoding -is [System.Text.UTF8Encoding]) -and ($Data.FileEOL -ne $Data.EOL)) {
-        $Modified = $True
+        $Modifiable = $True
     }
     else {
-        $Modified = $False
-        Write-Verbose ("VERBOSE: Ignoring non UTF-8 encoded target and/or its already converted to requested EOL markings: " + $Data.FileItem.FullName)
+        $Modifiable = $False
     }
+    
+    Set-SummaryTable -FileExtension $SummaryTableKey -Modified $Modifiable
 
-    Set-SummaryTable -FileExtension $SummaryTableKey -Modified $Modified
-
-    if ($Data.WhatIf) {
-        if ($Data.Encoding -is [System.Text.UTF8Encoding]) {
-            Write-Output -InputObject ("What if: " + $Data.FileItem.FullName + ": currently has EOL markings of " + $Data.FileEOL)
-        }
+    if ($Data.IgnoredFilePath) {
+        Write-Verbose ("This file has been excluded per ignore file: " + $Data.IgnoredFilePath)
+    }
+    elseif ($Data.Encoding -isnot [System.Text.UTF8Encoding]) {
+        Write-Verbose ("This file has been excluded since it is not UTF-8 encoded: " + $Data.FileItem.FullName)
+    }
+    elseif ($Data.EOL -ne $Data.EOL) {
+        Write-Verbose ("This file has been excluded since the line endings are the same as requested to convert to: " + $Data.FileItem.FullName)
     }
 }
 
+function Import-GitIgnoreFile {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $True, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Path,
+
+        [switch]$WhatIf
+    )
+
+    $Results = Get-ChildItem -Path $Path -Filter ".gitignore" -Recurse -OutVariable IgnoreItem | Get-Content | Where-Object { 
+        (($_.length -gt 1) -and ($_.StartsWith('#') -ne $true)) 
+    }
+    
+    if ($Results) {
+        Write-Verbose ("Using the following ignore file: " + $IgnoreItem.FullName)
+    }
+
+    $Results
+}
 Export-ModuleMember -Function ConvertTo-LF
 Export-ModuleMember -Function ConvertTo-CRLF
