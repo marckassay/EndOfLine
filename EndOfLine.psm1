@@ -2,8 +2,8 @@ function ConvertTo-LF {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $True)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $true)]
+        [ValidateNotnullOrEmpty()]
         [string[]]$Path,
 
         [switch]$SkipIgnoreFile,
@@ -18,7 +18,7 @@ function ConvertTo-LF {
     $ConfirmationMessage = New-ConfirmationMessage -EOL "LF" -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
-    if ($Decision -eq $True) {
+    if ($Decision -eq $true) {
         Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
     }
     else {
@@ -30,8 +30,8 @@ function ConvertTo-CRLF {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $True)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $true)]
+        [ValidateNotnullOrEmpty()]
         [string[]]$Path,
 
         [switch]$SkipIgnoreFile,
@@ -46,7 +46,7 @@ function ConvertTo-CRLF {
     $ConfirmationMessage = New-ConfirmationMessage -EOL "CRLF" -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
-    if ($Decision -eq $True) {
+    if ($Decision -eq $true) {
         Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
     }
     else {
@@ -58,8 +58,8 @@ function Import-GitIgnoreFile {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $True, Position = 1)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $true, Position = 1)]
+        [ValidateNotnullOrEmpty()]
         [string[]]$Path,
 
         [switch]$WhatIf
@@ -86,7 +86,7 @@ function New-ConfirmationMessage {
         [switch]$WhatIf
     )
     
-    if ($WhatIf.IsPresent -eq $False) {
+    if ($WhatIf.IsPresent -eq $false) {
         $ConfirmationMessage = @"
 You have requested to convert all files to ${EOL} end-of-line (EOL) characters."
 "@
@@ -103,7 +103,7 @@ You have requested to see what files will be converted to ${EOL} end-of-line (EO
 function Request-Confirmation {
     Param
     (
-        [Parameter(Mandatory = $True, Position = 1)]
+        [Parameter(Mandatory = $true, Position = 1)]
         [string]$Message,
 
         [switch]$WhatIf
@@ -130,11 +130,11 @@ function Start-ConversionProcess {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $True)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $true)]
+        [ValidateNotnullOrEmpty()]
         [string[]]$Path,
 
-        [Parameter(Mandatory = $False)]
+        [Parameter(Mandatory = $false)]
         [string[]]$IgnoreTable,
 
         [ValidateSet("LF", "CRLF")]
@@ -144,7 +144,7 @@ function Start-ConversionProcess {
     )
     
     try {
-        if ((Test-Path $Path) -eq $False) {
+        if ((Test-Path $Path) -eq $false) {
             if (Test-Path -PathType Container -IsValid) {
                 throw [System.IO.DirectoryNotFoundException]::new()
             }
@@ -160,9 +160,9 @@ function Start-ConversionProcess {
 
         $IsContainer = Resolve-Path $Path | Test-Path -IsValid -PathType Container
         
-        if ($IsContainer -eq $True) {
+        if ($IsContainer -eq $true) {
             Get-ChildItem -Path $Path -Recurse | ForEach-Object -Process {
-                if ($_.PSIsContainer -eq $False) {
+                if ($_.PSIsContainer -eq $false) {
                     $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
                         Write-File  | `
                         Out-ReportData
@@ -179,7 +179,7 @@ function Start-ConversionProcess {
             $ReportCollection += $ReportData
         }
 
-        Format-ReportTable -WhatIf:$WhatIf.IsPresent -ReportCollection $ReportCollection
+        Format-ReportTable -EOL $EOL -ReportCollection $ReportCollection -WhatIf:$WhatIf.IsPresent
     }
     catch [System.IO.DirectoryNotFoundException] {
         Write-Error -Message ("The following directory cannot be found: $Path")
@@ -196,9 +196,12 @@ function Format-ReportTable {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $True)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $true)]
+        [ValidateNotnullOrEmpty()]
         $ReportCollection,
+
+        [ValidateSet("LF", "CRLF")]
+        [string]$EOL,
 
         [switch]$WhatIf
     )
@@ -212,11 +215,11 @@ function Format-ReportTable {
  
     if ($WhatIf.IsPresent) {
         $ColHeaderForModified = "Would be Modified    "
-        $SummaryMessage = "A total of '$ModifiedCount' files would have been modified."
+        $SummaryMessage = "A total of '$ModifiedCount' files would have been modified with " + $EOL + " end-of-line (EOL) characters."
     }
     else {
         $ColHeaderForModified = "Modified    "
-        $SummaryMessage = "A total of '$ModifiedCount' files has been modified."
+        $SummaryMessage = "A total of '$ModifiedCount' files has been modified with " + $EOL + " end-of-line (EOL) characters."
     }
 
     $ReportCollection | `
@@ -246,14 +249,14 @@ function Get-FileObject {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $True)]
+        [Parameter(Mandatory = $true)]
         [string]$FilePath,
 
-        [Parameter(Mandatory = $True)]
+        [Parameter(Mandatory = $true)]
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
-        [Parameter(Mandatory = $False)]
+        [Parameter(Mandatory = $false)]
         $IgnoreTable,
         
         [switch]$WhatIf
@@ -269,8 +272,8 @@ function Get-FileObject {
         ExcludedFromIgnoreFile = $false
         EncodingNotCompatiable = $false
         SameEOLAsRequested     = $false
-        EndsWithEmptyNewLine   = $False
-        Modified               = $False
+        EndsWithEmptyNewLine   = $false
+        Modified               = $false
         WhatIf                 = $WhatIf.IsPresent
     }
     
@@ -289,9 +292,12 @@ function Get-FileObject {
     }
 
     if ($Data.FileItem) {
-        New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-Null
+        New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-null
 
         $Data.FileContent = $StreamReader.ReadToEnd();
+        $Data.FileEncoding = $StreamReader.CurrentEncoding;
+        $Data.EncodingNotCompatiable = ($Data.FileEncoding -isnot [System.Text.UTF8Encoding])
+
         $StreamReader.Dispose()
 
         [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
@@ -328,35 +334,21 @@ function Write-File {
     [CmdletBinding()]
     Param
     (
-        [Parameter(ValueFromPipeline = $True)]
+        [Parameter(ValueFromPipeline = $true)]
         [PSCustomObject]$Data
     )
 
-    # If running in destructive mode (not in WhatIf) pass just the FullName to StreamWriter.
-    # If running in destructive mode then it MUST have $True passed-in as second parameter 
-    # which signifies to append.  Otherwise it will delete all contents of file.
-    if ($Data.FileItem) {
-        if (!$Data.WhatIf) {
-            $StreamWriterArguments = $Data.FileItem.FullName
-        }
-        else {
-            $StreamWriterArguments = @($Data.FileItem.FullName, $True)
-        }
-        New-Object -TypeName System.IO.StreamWriter -ArgumentList $StreamWriterArguments -OutVariable StreamWriter | Out-Null
+    if (($Data.ExcludedFromIgnoreFile -eq $false) -and `
+        ($Data.SameEOLAsRequested -eq $false) -and `
+        ($Data.EncodingNotCompatiable -eq $false)) {
+ 
+        if ($Data.WhatIf -eq $false) {
+            New-Object -TypeName System.IO.StreamWriter -ArgumentList $Data.FileItem.FullName -OutVariable StreamWriter | Out-null
 
-        $Data.FileEncoding = $StreamWriter.Encoding
-        $Data.EncodingNotCompatiable = ($Data.FileEncoding -isnot [System.Text.UTF8Encoding])
-
-        if (($Data.EncodingNotCompatiable -eq $false) -and ($Data.SameEOLAsRequested -eq $false)) {
-            # if $Data.EOL equals 'CRLF' we shouldnt have to do anything since 
-            # PowerShell defaults to the same EOL markings (at least on Windows).
-            # but if this file has lone LF endings, edit $HeaderPrependedToFileString
-            # to have just LF endings too. 
-            #
             # Although the following may be benefical here in some environments:
             #  $OutputEncoding
             #  $OFS = $Info.LineEnding
-            #  $StreamWriter.NewLine = $True (although, this is a get/set prop PowerShell
+            #  $StreamWriter.NewLine = $true (although, this is a get/set prop PowerShell
             #       cant set it)
             #  $TextWriter.CoreNewLine (StreamWriter inherits from this class)
             if ($Data.EOL -eq 'LF') {
@@ -373,13 +365,7 @@ function Write-File {
             }
 
             try {
-                if (!$Data.WhatIf) {
-                    $StreamWriter.Write($Data.FileContent)
-                }
-                    
-                # free memory; no longer need FileContent data
-                $Data.FileContent = ''
-                $Data.Modified = $True
+                $StreamWriter.Write($Data.FileContent)
                 $StreamWriter.Flush()
                 $StreamWriter.Close()
             }
@@ -387,8 +373,11 @@ function Write-File {
                 Write-Error ("EndOfLine threw an exception when writing to: " + $Data.FileItem.FullName)
             }
         }
+        
+        $Data.Modified = $true
+        # free-up memory; no longer need FileContent data
+        $Data.FileContent = ''
     }
-
     $Data
 }
 
@@ -396,12 +385,12 @@ function Out-ReportData {
     [CmdletBinding()]
     Param 
     (
-        [Parameter(ValueFromPipeline = $True)]
+        [Parameter(ValueFromPipeline = $true)]
         [PSCustomObject]$Data
     )
 
-    if ($Data.Modified -eq $True) {
-        if ($Data.WhatIf -eq $False) {
+    if ($Data.Modified -eq $true) {
+        if ($Data.WhatIf -eq $false) {
             Write-Verbose ("  Modifying file")
         }
         else {
