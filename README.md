@@ -1,6 +1,7 @@
 # EndOfLine
 
-EndOfLine is a PowerShell module that automates converting end-of-line (EOL) characters in files.
+Conversion of end-of-line (EOL) characters: CRLF to LF and LF to CRLF, is the objective of this module.
+
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/marckassay/EndOfLine/blob/master/LICENSE) [![PS Gallery](https://img.shields.io/badge/install-PS%20Gallery-blue.svg)](https://www.powershellgallery.com/packages/EndOfLine/)
 
 ## Features
