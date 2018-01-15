@@ -1,5 +1,3 @@
-$SummaryTable = @{}
-
 function ConvertTo-LF {
     [CmdletBinding()]
     Param
@@ -14,7 +12,7 @@ function ConvertTo-LF {
     )
 
     if ($SkipIgnoreFile.IsPresent -eq $false) {
-       $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
+        $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
     }
 
     $ConfirmationMessage = New-ConfirmationMessage -EOL "LF" -WhatIf:$WhatIf.IsPresent
@@ -24,7 +22,7 @@ function ConvertTo-LF {
         Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
     }
     else {
-        Write-Output -InputObject 'Procedure has been cancelled, no files have been modified.'
+        Write-Output -InputObject "Operation has been cancelled, no files have been modified."
     }
 }
 
@@ -42,7 +40,7 @@ function ConvertTo-CRLF {
     )
 
     if ($SkipIgnoreFile.IsPresent -eq $false) {
-       $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
+        $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
     }
 
     $ConfirmationMessage = New-ConfirmationMessage -EOL "CRLF" -WhatIf:$WhatIf.IsPresent
@@ -52,8 +50,30 @@ function ConvertTo-CRLF {
         Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
     }
     else {
-        Write-Output -InputObject 'Procedure has been cancelled, no files have been modified.'
+        Write-Output -InputObject "Operation has been cancelled, no files have been modified."
     }
+}
+
+function Import-GitIgnoreFile {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $True, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Path,
+
+        [switch]$WhatIf
+    )
+
+    $Results = Get-ChildItem -Path $Path -Filter ".gitignore" -Recurse -OutVariable IgnoreItem | Get-Content | Where-Object { 
+        (($_.length -gt 1) -and ($_.StartsWith('#') -ne $true)) 
+    }
+    
+    if ($Results) {
+        Write-Host ("Imported and will be using the following ignore file: " + $IgnoreItem.FullName)
+    }
+
+    $Results
 }
 
 function New-ConfirmationMessage {
@@ -68,16 +88,42 @@ function New-ConfirmationMessage {
     
     if ($WhatIf.IsPresent -eq $False) {
         $ConfirmationMessage = @"
-You have requested to convert all files to ${EOL} end-of-line (EOL) markings."
+You have requested to convert all files to ${EOL} end-of-line (EOL) characters."
 "@
     }
     else {
         $ConfirmationMessage = @"
-You have requested to see what files will be converted to ${EOL} end-of-line (EOL) markings."
+You have requested to see what files will be converted to ${EOL} end-of-line (EOL) characters."
 "@
     }
 
     $ConfirmationMessage
+}
+
+function Request-Confirmation {
+    Param
+    (
+        [Parameter(Mandatory = $True, Position = 1)]
+        [string]$Message,
+
+        [switch]$WhatIf
+    )
+    
+    if ($WhatIf.IsPresent -eq $false) {
+        $Question = "Do you want to proceed in modifying file(s)?"
+    }
+    else {
+        $Question = "Since 'WhatIf' has been switched, do you want to see what file(s) would have been modified?"
+    }
+
+    $Yes = [System.Management.Automation.Host.ChoiceDescription]::new("&Yes")
+    $Yes.HelpMessage = "Executes operation"
+    $No = [System.Management.Automation.Host.ChoiceDescription]::new("&No")
+    $No.HelpMessage = "Aborts operation"
+
+    [bool]$Decision = !($Host.UI.PromptForChoice($Message, $Question, @($Yes, $No), 1))
+
+    $Decision
 }
 
 function Start-ConversionProcess {
@@ -95,8 +141,6 @@ function Start-ConversionProcess {
         [string]$EOL,
 
         [switch]$WhatIf
-
-
     )
     
     try {
@@ -112,25 +156,30 @@ function Start-ConversionProcess {
             }
         }
 
+        $ReportCollection = @()
+
         $IsContainer = Resolve-Path $Path | Test-Path -IsValid -PathType Container
         
         if ($IsContainer -eq $True) {
             Get-ChildItem -Path $Path -Recurse | ForEach-Object -Process {
                 if ($_.PSIsContainer -eq $False) {
-                    Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
-                        Write-File  | Write-Summary
+                    $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
+                        Write-File  | `
+                        Out-ReportData
+
+                    $ReportCollection += $ReportData
                 }
             }
         }
         else {
-            Get-FileObject -FilePath $_.FullName -EOL $EOL -WhatIf:$WhatIf.IsPresent | `
-                Write-File  | Write-Summary
+            $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
+                Write-File  | `
+                Out-ReportData
+
+            $ReportCollection += $ReportData
         }
 
-        Format-SummaryTable -WhatIf:$WhatIf.IsPresent
-        # clear tables to be used again in session and free memory...
-        $IgnoreTable = ''
-        $SummaryTable.Clear()
+        Format-ReportTable -WhatIf:$WhatIf.IsPresent -ReportCollection $ReportCollection
     }
     catch [System.IO.DirectoryNotFoundException] {
         Write-Error -Message ("The following directory cannot be found: $Path")
@@ -141,73 +190,56 @@ function Start-ConversionProcess {
     catch [System.IO.IOException] {
         Write-Error -Message ("The following is invalid: $Path")
     }
-    catch {
-        Write-Error -Message ("An error occurred when attempting to convert the following target: $Path")
-    }
 }
 
-function Set-SummaryTable {
-    Param
-    (
-        [Parameter(Mandatory = $True)]
-        [string]$FileExtension,
-
-        [Parameter(Mandatory = $True)]
-        [bool]$Modified
-    )
-    # TODO: perhaps Group-Object can be used in here
-    if ($SummaryTable.ContainsKey($FileExtension) -eq $True) {
-        ($SummaryTable[$FileExtension].Count)++
-    }
-    else {
-        $YesNo = if ($Modified -eq $True) {'Yes'} else {'No'}
-        $NewEntry = [PSCustomObject]@{Count = 1; Modified = $YesNo}
-        $SummaryTable.Add($FileExtension, $NewEntry)
-    }
-}
-
-function Format-SummaryTable {
+function Format-ReportTable {
     [CmdletBinding()]
     Param
     (
+        [Parameter(Mandatory = $True)]
+        [ValidateNotNullOrEmpty()]
+        $ReportCollection,
+
         [switch]$WhatIf
     )
     
-    if ($WhatIf.IsPresent) {
-        Write-Output @"
-
-Since the 'WhatIf' was switched, below is the what would of happened summary:
-"@
+    $ModifiedCount = 0
+    $ReportCollection | ForEach-Object {
+        if ($_.Modified) {
+            $ModifiedCount++
+        }
     }
-    Format-Table @{Label = "Found Files"; Expression = {($_.Name)}}, `
-    @{Label = "Count"; Expression = {($_.Value.Count)}}, `
-    @{Label = "Modified"; Expression = {($_.Value.Modified)}}`
-        -AutoSize -InputObject $SummaryTable
-}
-
-function Request-Confirmation {
-    Param
-    (
-        [Parameter(Mandatory = $True, Position = 1)]
-        [string]$Message,
-
-        [switch]$WhatIf
-    )
-    
-    if ($WhatIf.IsPresent -eq $false) {
-        $Question = 'Do you want to proceed in modifying file(s)?'
+ 
+    if ($WhatIf.IsPresent) {
+        $ColHeaderForModified = "Would be Modified    "
+        $SummaryMessage = "A total of '$ModifiedCount' files would have been modified."
     }
     else {
-        $Question = 'Do you want to simulate what will happen?'
+        $ColHeaderForModified = "Modified    "
+        $SummaryMessage = "A total of '$ModifiedCount' files has been modified."
     }
 
-    $Choices = New-Object Collections.ObjectModel.Collection[Management.Automation.Host.ChoiceDescription]
-    $Choices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList "&Yes"))
-    $Choices.Add((New-Object Management.Automation.Host.ChoiceDescription -ArgumentList "&No"))
+    $ReportCollection | `
+        Sort-Object -property `
+    @{Expression = "Modified"; Descending = $true}, `
+    @{Expression = "FilePath"; Descending = $false} | `
+        Format-Table `
+    @{Label = "Name    "; Expression = {($_.FilePath)}}, `
+    @{Label = $ColHeaderForModified; Expression = {($_.Modified)}; Alignment = "Left"}, `
+    @{Label = "Reason Not Modified    "; Expression = {
+            if ($_.ExcludedFromIgnoreFile) {
+                "Excluded by ignore file"
+            }
+            elseif ($_.EncodingNotCompatiable) {
+                "Encoding not compatiable"
+            }
+            elseif ($_.SameEOLAsRequested) {
+                "Same EOL as requested"
+            }
+        } ; Alignment = "Left"
+    } -AutoSize
 
-    [bool]$Decision = !($Host.UI.PromptForChoice($Message, $Question, $Choices, 1))
-    
-    $Decision
+    Write-Host $SummaryMessage
 }
 
 function Get-FileObject {
@@ -227,21 +259,29 @@ function Get-FileObject {
         [switch]$WhatIf
     )
 
-    $Data = [PsObject]@{
-        EOL                  = $EOL
-        FileItem             = $null
-        FileAsString         = ''
-        FileEOL              = ''
-        IgnoredFilePath      = ''
-        Encoding             = $null
-        EndsWithEmptyNewLine = $false
-        WhatIf               = $WhatIf.IsPresent
+    $Data = [PsCustomObject]@{
+        EOL                    = $EOL
+        FilePath               = ''
+        FileItem               = $null
+        FileContent            = ''
+        FileEOL                = ''
+        FileEncoding           = $null
+        ExcludedFromIgnoreFile = $false
+        EncodingNotCompatiable = $false
+        SameEOLAsRequested     = $false
+        EndsWithEmptyNewLine   = $False
+        Modified               = $False
+        WhatIf                 = $WhatIf.IsPresent
     }
+    
+    Write-Verbose ("Opening: " + $FilePath)
+    
+    $Data.FilePath = Resolve-Path $FilePath -Relative
 
     if ($IgnoreTable.Count) {
         $Data.FileItem = Get-Item -Path $FilePath -Exclude $IgnoreTable
         if (!$Data.FileItem) {
-            $Data.IgnoredFilePath = $FilePath
+            $Data.ExcludedFromIgnoreFile = $true
         }
     }
     else {
@@ -251,12 +291,12 @@ function Get-FileObject {
     if ($Data.FileItem) {
         New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-Null
 
-        $Data.FileAsString = $StreamReader.ReadToEnd();
+        $Data.FileContent = $StreamReader.ReadToEnd();
         $StreamReader.Dispose()
 
         [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
         [byte]$LF = 0x0A # 10  or  \n    or  `n
-        $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileAsString)
+        $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileContent)
         $FileAsBytesLength = $FileAsBytes.Length
 
         $IndexOfLF = $FileAsBytes.IndexOf($LF)
@@ -277,6 +317,8 @@ function Get-FileObject {
         else {
             $Data.FileEOL = 'unknown'
         }
+
+        $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
     }
 
     $Data
@@ -287,7 +329,7 @@ function Write-File {
     Param
     (
         [Parameter(ValueFromPipeline = $True)]
-        [PsObject]$Data
+        [PSCustomObject]$Data
     )
 
     # If running in destructive mode (not in WhatIf) pass just the FullName to StreamWriter.
@@ -302,9 +344,10 @@ function Write-File {
         }
         New-Object -TypeName System.IO.StreamWriter -ArgumentList $StreamWriterArguments -OutVariable StreamWriter | Out-Null
 
-        $Data.Encoding = $StreamWriter.Encoding
+        $Data.FileEncoding = $StreamWriter.Encoding
+        $Data.EncodingNotCompatiable = ($Data.FileEncoding -isnot [System.Text.UTF8Encoding])
 
-        if ($Data.Encoding -is [System.Text.UTF8Encoding]) {
+        if (($Data.EncodingNotCompatiable -eq $false) -and ($Data.SameEOLAsRequested -eq $false)) {
             # if $Data.EOL equals 'CRLF' we shouldnt have to do anything since 
             # PowerShell defaults to the same EOL markings (at least on Windows).
             # but if this file has lone LF endings, edit $HeaderPrependedToFileString
@@ -317,23 +360,26 @@ function Write-File {
             #       cant set it)
             #  $TextWriter.CoreNewLine (StreamWriter inherits from this class)
             if ($Data.EOL -eq 'LF') {
-                $Data.FileAsString = $Data.FileAsString -replace "`r", ""
+                $Data.FileContent = $Data.FileContent -replace "`r", ""
                 if ($Data.EndsWithEmptyNewLine) {
-                    $Data.FileAsString + "`n"
+                    $Data.FileContent + "`n"
                 }
             }
             elseif ($Data.EOL -eq 'CRLF') {
-                $Data.FileAsString = $Data.FileAsString -replace "`r`n", ""
+                $Data.FileContent = $Data.FileContent -replace "`r`n", ""
                 if ($Data.EndsWithEmptyNewLine) {
-                    $Data.FileAsString + "`r`n"
+                    $Data.FileContent + "`r`n"
                 }
             }
 
             try {
                 if (!$Data.WhatIf) {
-                    $StreamWriter.Write($Data.FileAsString)
+                    $StreamWriter.Write($Data.FileContent)
                 }
-            
+                    
+                # free memory; no longer need FileContent data
+                $Data.FileContent = ''
+                $Data.Modified = $True
                 $StreamWriter.Flush()
                 $StreamWriter.Close()
             }
@@ -346,67 +392,38 @@ function Write-File {
     $Data
 }
 
-function Write-Summary {
+function Out-ReportData {
     [CmdletBinding()]
     Param 
     (
         [Parameter(ValueFromPipeline = $True)]
-        [PsObject]$Data
+        [PSCustomObject]$Data
     )
 
-    # for files that dont have a file extension
-    if ($Data.FileItem -and $Data.FileItem.Extension) {
-        $SummaryTableKey = $Data.FileItem.Extension
-    }
-    elseif ($Data.FileItem) {
-        $SummaryTableKey = $Data.FileItem.Name
+    if ($Data.Modified -eq $True) {
+        if ($Data.WhatIf -eq $False) {
+            Write-Verbose ("  Modifying file")
+        }
+        else {
+            Write-Verbose ("  Would have modified file")
+        }
     }
     else {
-        if ($Data.IgnoredFilePath -match '\.\w+$') {
-            $SummaryTableKey = $Matches[0]
+        if ($Data.ExcludedFromIgnoreFile) {
+            Write-Verbose ("  This file has been excluded per ignore file: " + $Data.FilePath)
+        }
+        elseif ($Data.SameEOLAsRequested) {
+            Write-Verbose ("  This file has been excluded since the end-of-line characters are the same as requested to convert.") 
+        }
+        elseif ($Data.EncodingNotCompatiable) {
+            Write-Verbose ("  This file has been excluded since it is not UTF-8 encoded.")
         }
     }
 
-    if (($Data.Encoding -is [System.Text.UTF8Encoding]) -and ($Data.FileEOL -ne $Data.EOL)) {
-        $Modifiable = $True
-    }
-    else {
-        $Modifiable = $False
-    }
-    
-    Set-SummaryTable -FileExtension $SummaryTableKey -Modified $Modifiable
+    Write-Verbose ("Closing file")
 
-    if ($Data.IgnoredFilePath) {
-        Write-Verbose ("This file has been excluded per ignore file: " + $Data.IgnoredFilePath)
-    }
-    elseif ($Data.Encoding -isnot [System.Text.UTF8Encoding]) {
-        Write-Verbose ("This file has been excluded since it is not UTF-8 encoded: " + $Data.FileItem.FullName)
-    }
-    elseif ($Data.EOL -ne $Data.EOL) {
-        Write-Verbose ("This file has been excluded since the line endings are the same as requested to convert to: " + $Data.FileItem.FullName)
-    }
+    $Data
 }
 
-function Import-GitIgnoreFile {
-    [CmdletBinding()]
-    Param
-    (
-        [Parameter(Mandatory = $True, Position = 1)]
-        [ValidateNotNullOrEmpty()]
-        [string[]]$Path,
-
-        [switch]$WhatIf
-    )
-
-    $Results = Get-ChildItem -Path $Path -Filter ".gitignore" -Recurse -OutVariable IgnoreItem | Get-Content | Where-Object { 
-        (($_.length -gt 1) -and ($_.StartsWith('#') -ne $true)) 
-    }
-    
-    if ($Results) {
-        Write-Verbose ("Using the following ignore file: " + $IgnoreItem.FullName)
-    }
-
-    $Results
-}
 Export-ModuleMember -Function ConvertTo-LF
 Export-ModuleMember -Function ConvertTo-CRLF
