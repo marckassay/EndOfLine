@@ -8,6 +8,8 @@ function ConvertTo-LF {
 
         [switch]$SkipIgnoreFile,
 
+        [switch]$ExperimentalEncodingConversion,
+
         [switch]$WhatIf
     )
 
@@ -19,7 +21,8 @@ function ConvertTo-LF {
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
+        Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreTable $IgnoreTable `
+            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
     }
     else {
         Write-Output -InputObject "Operation has been cancelled, no files have been modified."
@@ -36,6 +39,8 @@ function ConvertTo-CRLF {
 
         [switch]$SkipIgnoreFile,
         
+        [switch]$ExperimentalEncodingConversion,
+
         [switch]$WhatIf
     )
 
@@ -47,7 +52,8 @@ function ConvertTo-CRLF {
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent
+        Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreTable $IgnoreTable `
+            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
     }
     else {
         Write-Output -InputObject "Operation has been cancelled, no files have been modified."
@@ -140,6 +146,8 @@ function Start-ConversionProcess {
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
+        [switch]$ExperimentalEncodingConversion,
+
         [switch]$WhatIf
     )
     
@@ -163,7 +171,8 @@ function Start-ConversionProcess {
         if ($IsContainer -eq $true) {
             Get-ChildItem -Path $Path -Recurse | ForEach-Object -Process {
                 if ($_.PSIsContainer -eq $false) {
-                    $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
+                    $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable `
+                        -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent | `
                         Write-File  | `
                         Out-ReportData
 
@@ -172,7 +181,8 @@ function Start-ConversionProcess {
             }
         }
         else {
-            $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable -WhatIf:$WhatIf.IsPresent | `
+            $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable `
+                -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent | `
                 Write-File  | `
                 Out-ReportData
 
@@ -234,7 +244,7 @@ function Format-ReportTable {
                 "Excluded by ignore file"
             }
             elseif ($_.EncodingNotCompatiable) {
-                "Encoding not compatiable"
+                "Encoding not compatiable - " + $_.FileEncoding.WebName
             }
             elseif ($_.SameEOLAsRequested) {
                 "Same EOL as requested"
@@ -259,26 +269,29 @@ function Get-FileObject {
         [Parameter(Mandatory = $false)]
         $IgnoreTable,
         
+        [switch]$ExperimentalEncodingConversion,
+
         [switch]$WhatIf
     )
 
     $Data = [PsCustomObject]@{
-        EOL                    = $EOL
-        FilePath               = ''
-        FileItem               = $null
-        FileContent            = ''
-        FileEOL                = ''
-        FileEncoding           = $null
-        ExcludedFromIgnoreFile = $false
-        EncodingNotCompatiable = $false
-        SameEOLAsRequested     = $false
-        EndsWithEmptyNewLine   = $false
-        Modified               = $false
-        WhatIf                 = $WhatIf.IsPresent
+        EOL                            = $EOL
+        FilePath                       = ''
+        FileItem                       = $null
+        FileContent                    = ''
+        FileEOL                        = ''
+        FileEncoding                   = $null
+        ExcludedFromIgnoreFile         = $false
+        EncodingNotCompatiable         = $false
+        SameEOLAsRequested             = $false
+        EndsWithEmptyNewLine           = $false
+        Modified                       = $false
+        ExperimentalEncodingConversion = $ExperimentalEncodingConversion.IsPresent
+        WhatIf                         = $WhatIf.IsPresent
     }
     
     Write-Verbose ("Opening: " + $FilePath)
-    
+    # ConvertTo-LF -Path E:\Temp\PSTrueCrypt -WhatIf -ExperimentalEncodingConversion
     $Data.FilePath = Resolve-Path $FilePath -Relative
 
     if ($IgnoreTable.Count) {
@@ -291,40 +304,52 @@ function Get-FileObject {
         $Data.FileItem = Get-Item -Path $FilePath
     }
 
-    if ($Data.FileItem) {
+    if ($Data.ExcludedFromIgnoreFile -eq $false) {
+        [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
+        [byte]$LF = 0x0A # 10  or  \n    or  `n
+      
         New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-null
 
         $Data.FileContent = $StreamReader.ReadToEnd();
         $Data.FileEncoding = $StreamReader.CurrentEncoding;
-        $Data.EncodingNotCompatiable = ($Data.FileEncoding -isnot [System.Text.UTF8Encoding])
-
         $StreamReader.Dispose()
 
-        [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
-        [byte]$LF = 0x0A # 10  or  \n    or  `n
-        $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileContent)
-        $FileAsBytesLength = $FileAsBytes.Length
-
-        $IndexOfLF = $FileAsBytes.IndexOf($LF)
-        if (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -ne $CR)) {
-            $Data.FileEOL = 'LF'
-            if ($FileAsBytesLength) {
-                $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
-                ($FileAsBytes.Get($FileAsBytesLength - 2) -eq $LF)
-            }
+        if ($Data.FileEncoding -is [System.Text.UTF8Encoding]) {
+            $Data.EncodingNotCompatiable = $false
+            $FileAsBytes = [System.Text.Encoding]::UTF8.GetBytes($Data.FileContent)
+            $FileAsBytesLength = $FileAsBytes.Length
         }
-        elseif (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -eq $CR)) {
-            $Data.FileEOL = 'CRLF'
-            if ($FileAsBytesLength) {
-                $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
-                ($FileAsBytes.Get($FileAsBytesLength - 3) -eq $LF)
-            }
+        elseif (($Data.ExperimentalEncodingConversion -eq $true) -and ($Data.FileEncoding -is [System.Text.UnicodeEncoding])) {
+            $Data.EncodingNotCompatiable = $false
+            $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileContent)
+            $FileAsBytesLength = $FileAsBytes.Length
         }
         else {
-            $Data.FileEOL = 'unknown'
+            $Data.EncodingNotCompatiable = $true
         }
+        
+        if ($Data.EncodingNotCompatiable -eq $false) {
+            $IndexOfLF = $FileAsBytes.IndexOf($LF)
+            if (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -ne $CR)) {
+                $Data.FileEOL = 'LF'
+                if ($FileAsBytesLength) {
+                    $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
+                    ($FileAsBytes.Get($FileAsBytesLength - 2) -eq $LF)
+                }
+            }
+            elseif (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -eq $CR)) {
+                $Data.FileEOL = 'CRLF'
+                if ($FileAsBytesLength) {
+                    $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
+                    ($FileAsBytes.Get($FileAsBytesLength - 3) -eq $LF)
+                }
+            }
+            else {
+                $Data.FileEOL = 'unknown'
+            }
 
-        $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
+            $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
+        }
     }
 
     $Data
@@ -373,7 +398,7 @@ function Write-File {
                 Write-Error ("EndOfLine threw an exception when writing to: " + $Data.FileItem.FullName)
             }
         }
-        
+
         $Data.Modified = $true
         # free-up memory; no longer need FileContent data
         $Data.FileContent = ''
