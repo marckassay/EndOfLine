@@ -1,6 +1,6 @@
 # EndOfLine
 
-Conversion of end-of-line (EOL) characters: CRLF to LF and LF to CRLF, is the objective of this module.
+Objective of this module is conversion of end-of-line (EOL) characters: CRLF to LF or LF to CRLF
 
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/marckassay/EndOfLine/blob/master/LICENSE) [![PS Gallery](https://img.shields.io/badge/install-PS%20Gallery-blue.svg)](https://www.powershellgallery.com/packages/EndOfLine/)
 
@@ -12,6 +12,7 @@ Conversion of end-of-line (EOL) characters: CRLF to LF and LF to CRLF, is the ob
 
 ## Caveat
 
+* Current issue with using `gitignore` file.
 * The nature of this module may be destructive in some situations.  Please have backup plan in place before executing.
 * Files are expected to be encoded in UTF-8.  If encoded in anything else it will not be modified unless called with `ExperimentalEncodingConversion` switch.  This switch *may* safely convert UTF-16 into UTF-8.  If it does safey convert the encoding, some diff editors (perhaps all) will show the file's bytes not decoded (which is expected) before the modification.  Until I have a better understanding of decoding and encoding Unicode files I will keep this switch as-is.
 

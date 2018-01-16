@@ -14,14 +14,14 @@ function ConvertTo-LF {
     )
 
     if ($SkipIgnoreFile.IsPresent -eq $false) {
-        $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
+        $IgnoreHashTable = Import-GitIgnoreFile $Path
     }
 
     $ConfirmationMessage = New-ConfirmationMessage -EOL "LF" -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreTable $IgnoreTable `
+        Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreHashTable $IgnoreHashTable `
             -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
     }
     else {
@@ -45,14 +45,14 @@ function ConvertTo-CRLF {
     )
 
     if ($SkipIgnoreFile.IsPresent -eq $false) {
-        $IgnoreTable = Import-GitIgnoreFile $Path -WhatIf:$WhatIf.IsPresent
+        $IgnoreHashTable = Import-GitIgnoreFile $Path
     }
 
     $ConfirmationMessage = New-ConfirmationMessage -EOL "CRLF" -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreTable $IgnoreTable `
+        Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreHashTable $IgnoreHashTable `
             -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
     }
     else {
@@ -66,20 +66,36 @@ function Import-GitIgnoreFile {
     (
         [Parameter(Mandatory = $true, Position = 1)]
         [ValidateNotnullOrEmpty()]
-        [string[]]$Path,
-
-        [switch]$WhatIf
+        [string[]]$Path
     )
-
-    $Results = Get-ChildItem -Path $Path -Filter ".gitignore" -Recurse -OutVariable IgnoreItem | Get-Content | Where-Object { 
-        (($_.length -gt 1) -and ($_.StartsWith('#') -ne $true)) 
-    }
     
-    if ($Results) {
-        Write-Host ("Imported and will be using the following ignore file: " + $IgnoreItem.FullName)
-    }
+    try {
+        $Results = Get-ChildItem -Path $Path -Recurse -Depth 1 -Filter ".gitignore" -OutVariable IgnoreFile | `
+            Select-Object -First 1 | `
+            Get-Content | `
+            Where-Object {($_.StartsWith('#') -ne $true)}
 
-    $Results
+        $WildEntries = $Results | Where-Object { $_.Contains('*') -eq $true }
+        Push-Location
+        $Path | Set-Location
+        $PathEntries = $Results | Resolve-Path -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path
+        Pop-Location
+        # since .git folder are not listed in .gitignore, add it to PathEntries
+        $PathEntries += $IgnoreFile.DirectoryName | Join-Path -ChildPath .git
+        
+        $IgnoreHashTable = @{
+            WildEntries = $WildEntries
+            PathEntries = $PathEntries
+        }
+
+        if ($IgnoreFile) {
+            Write-Host ("Imported and will be using the following ignore file: " + $IgnoreFile.FullName)
+        }
+        
+        $IgnoreHashTable
+    }
+    catch {
+    }
 }
 
 function New-ConfirmationMessage {
@@ -141,7 +157,7 @@ function Start-ConversionProcess {
         [string[]]$Path,
 
         [Parameter(Mandatory = $false)]
-        [string[]]$IgnoreTable,
+        [hashtable]$IgnoreHashTable,
 
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
@@ -171,7 +187,7 @@ function Start-ConversionProcess {
         if ($IsContainer -eq $true) {
             Get-ChildItem -Path $Path -Recurse | ForEach-Object -Process {
                 if ($_.PSIsContainer -eq $false) {
-                    $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable `
+                    $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreHashTable $IgnoreHashTable `
                         -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent | `
                         Write-File  | `
                         Out-ReportData
@@ -181,7 +197,7 @@ function Start-ConversionProcess {
             }
         }
         else {
-            $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreTable $IgnoreTable `
+            $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreHashTable $IgnoreHashTable `
                 -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent | `
                 Write-File  | `
                 Out-ReportData
@@ -267,7 +283,7 @@ function Get-FileObject {
         [string]$EOL,
 
         [Parameter(Mandatory = $false)]
-        $IgnoreTable,
+        [hashtable]$IgnoreHashTable,
         
         [switch]$ExperimentalEncodingConversion,
 
@@ -291,13 +307,18 @@ function Get-FileObject {
     }
     
     Write-Verbose ("Opening: " + $FilePath)
-    # ConvertTo-LF -Path E:\Temp\PSTrueCrypt -WhatIf -ExperimentalEncodingConversion
+
     $Data.FilePath = Resolve-Path $FilePath -Relative
 
-    if ($IgnoreTable.Count) {
-        $Data.FileItem = Get-Item -Path $FilePath -Exclude $IgnoreTable
-        if (!$Data.FileItem) {
-            $Data.ExcludedFromIgnoreFile = $true
+    if ($IgnoreHashTable) {
+        $Data.ExcludedFromIgnoreFile = $IgnoreHashTable.PathEntries | ForEach-Object { 
+            if ($FilePath.StartsWith($_)) {$true}
+        } 
+        if ($Data.ExcludedFromIgnoreFile -eq $false) {
+            $Data.FileItem = Get-Item -Path $FilePath -Exclude $IgnoreHashTable.WildEntries
+            if (!$Data.FileItem) {
+                $Data.ExcludedFromIgnoreFile = $true
+            }
         }
     }
     else {
