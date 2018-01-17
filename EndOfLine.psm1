@@ -1,3 +1,5 @@
+$script:ReportCollection
+
 function ConvertTo-LF {
     [CmdletBinding()]
     Param
@@ -70,22 +72,42 @@ function Import-GitIgnoreFile {
     )
     
     try {
-        $Results = Get-ChildItem -Path $Path -Recurse -Depth 1 -Filter ".gitignore" -OutVariable IgnoreFile | `
-            Select-Object -First 1 | `
-            Get-Content | `
-            Where-Object {($_.StartsWith('#') -ne $true)}
-
-        $WildEntries = $Results | Where-Object { $_.Contains('*') -eq $true }
         Push-Location
         $Path | Set-Location
-        $PathEntries = $Results | Resolve-Path -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Path
+
+        $GitIgnoreContents = Get-ChildItem -Path . -Recurse -Depth 1 -Filter ".gitignore" -OutVariable IgnoreFile | `
+            Select-Object -First 1 | `
+            Get-Content | `
+            Where-Object {($_.Length -gt 0) -and ($_.StartsWith('#') -ne $true)}
+
+        $FolderEntries = @()
+        $FileEntries = @()
+
+        $GitIgnoreContents | ForEach-Object { 
+            # https://git-scm.com/docs/gitignore
+            if ($_ -match '\w/') {
+                # test to see which top-level folders exist
+                if (Join-Path -Path . -ChildPath $_ -Resolve -ErrorAction SilentlyContinue | Test-Path -PathType Container) {
+                    $FolderEntries += $_.Trim('/')
+                }
+            }
+            else {
+                # test to see which top-level files exist
+                if (Join-Path -Path . -ChildPath $_ -Resolve -ErrorAction SilentlyContinue | Test-Path -PathType Leaf) {
+                    # call Trim() here for element will be a string in quotes.
+                    $FileEntries += $_.Trim()
+                }
+            }
+        }
+
         Pop-Location
-        # since .git folder are not listed in .gitignore, add it to PathEntries
-        $PathEntries += $IgnoreFile.DirectoryName | Join-Path -ChildPath .git
+
+        # since .git folder are not listed in .gitignore, add it to FolderEntries
+        $FolderEntries += '.git'
         
         $IgnoreHashTable = @{
-            WildEntries = $WildEntries
-            PathEntries = $PathEntries
+            FolderEntries = $FolderEntries
+            FileEntries   = $FileEntries
         }
 
         if ($IgnoreFile) {
@@ -95,6 +117,7 @@ function Import-GitIgnoreFile {
         $IgnoreHashTable
     }
     catch {
+
     }
 }
 
@@ -180,32 +203,20 @@ function Start-ConversionProcess {
             }
         }
 
-        $ReportCollection = @()
+        # ConvertTo-LF -Path E:\Temp\AIT -WhatIf
+        <#         
+        $IgnoreHashTable.FolderEntries | ForEach-Object {
+            $ReportCollection += $_
+        } #>
+        $script:ReportCollection = @()
 
-        $IsContainer = Resolve-Path $Path | Test-Path -IsValid -PathType Container
-        
-        if ($IsContainer -eq $true) {
-            Get-ChildItem -Path $Path -Recurse | ForEach-Object -Process {
-                if ($_.PSIsContainer -eq $false) {
-                    $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreHashTable $IgnoreHashTable `
-                        -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent | `
-                        Write-File  | `
-                        Out-ReportData
+        Invoke-RecurseFolders -Path $Path[0] `
+            -EOL $EOL `
+            -IgnoreHashTable $IgnoreHashTable `
+            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
+            -WhatIf:$WhatIf.IsPresent
 
-                    $ReportCollection += $ReportData
-                }
-            }
-        }
-        else {
-            $ReportData = Get-FileObject -FilePath $_.FullName -EOL $EOL -IgnoreHashTable $IgnoreHashTable `
-                -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent | `
-                Write-File  | `
-                Out-ReportData
-
-            $ReportCollection += $ReportData
-        }
-
-        Format-ReportTable -EOL $EOL -ReportCollection $ReportCollection -WhatIf:$WhatIf.IsPresent
+        Format-ReportTable -EOL $EOL -WhatIf:$WhatIf.IsPresent
     }
     catch [System.IO.DirectoryNotFoundException] {
         Write-Error -Message ("The following directory cannot be found: $Path")
@@ -218,56 +229,113 @@ function Start-ConversionProcess {
     }
 }
 
+# https://social.technet.microsoft.com/Forums/windowsserver/en-US/71a473c7-7cee-4c48-ab02-491703aa1f5f/getchilditem-with-millions-of-files
+# Brian Nadjiwon
+function Invoke-RecurseFolders {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $false)]
+        [string]$Path,
+        
+        [ValidateSet("LF", "CRLF")]
+        [string]$EOL,
+
+        [Parameter(Mandatory = $false)]
+        [hashtable]$IgnoreHashTable,
+
+        [switch]$ExperimentalEncodingConversion,
+
+        [switch]$WhatIf
+    )
+
+    Set-Location -Path $Path
+
+    # seems when -File and -Exclude are switched on Get-ChildItem, it doesnt return anything hence the piped Where-Object
+    [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {$_.PSIsContainer -eq $false}
+    ForEach ($File in $Files) {
+        $script:ReportCollection += Get-FileObject `
+            -FilePath $File `
+            -EOL $EOL `
+            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
+            -WhatIf:$WhatIf.IsPresent | `
+            Write-File | `
+            Out-ReportData
+    }
+
+    [string[]]$Folders = Get-ChildItem '.' -Directory -Exclude $IgnoreHashTable.FolderEntries
+    ForEach ($Folder in $Folders) {
+        Invoke-RecurseFolders -Path $Folder `
+            -EOL $EOL `
+            -IgnoreHashTable $IgnoreHashTable `
+            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
+            -WhatIf:$WhatIf.IsPresent
+
+        Set-Location -Path '..'
+    }
+}
+
 function Format-ReportTable {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $true)]
-        [ValidateNotnullOrEmpty()]
-        $ReportCollection,
-
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
         [switch]$WhatIf
     )
     
-    $ModifiedCount = 0
-    $ReportCollection | ForEach-Object {
-        if ($_.Modified) {
-            $ModifiedCount++
+    if ($script:ReportCollection.Count -gt 0) {
+        $ModifiedCount = 0
+        $script:ReportCollection | ForEach-Object {
+            if ($_.Modified) {
+                $ModifiedCount++
+            }
         }
-    }
  
-    if ($WhatIf.IsPresent) {
-        $ColHeaderForModified = "Would be Modified    "
-        $SummaryMessage = "A total of '$ModifiedCount' files would have been modified with " + $EOL + " end-of-line (EOL) characters."
+        if ($WhatIf.IsPresent) {
+            $ColHeaderForModified = "Would be Modified    "
+            $SummaryMessage = "A total of '$ModifiedCount' files would have been modified with " + $EOL + " end-of-line (EOL) characters."
+        }
+        else {
+            $ColHeaderForModified = "Modified    "
+            $SummaryMessage = "A total of '$ModifiedCount' files has been modified with " + $EOL + " end-of-line (EOL) characters."
+        }
+
+        $script:ReportCollection | `
+            Sort-Object -property `
+        @{Expression = "Modified"; Descending = $true}, `
+        @{Expression = "FilePath"; Descending = $false} | `
+            Format-Table `
+        @{Label = "Name    "; Expression = {($_.FilePath)}}, `
+        @{Label = $ColHeaderForModified; Expression = {($_.Modified)}; Alignment = "Left"}, `
+        @{Label = "Reason Not Modified    "; Expression = {
+                if ($_.ExcludedFromIgnoreFile) {
+                    "Excluded by ignore file"
+                }
+                elseif ($_.EncodingNotCompatiable) {
+                    "Encoding not compatiable - " + $_.FileEncoding.WebName
+                }
+                elseif ($_.SameEOLAsRequested) {
+                    "Same EOL as requested"
+                }
+            } ; Alignment = "Left"
+        } -AutoSize
     }
     else {
-        $ColHeaderForModified = "Modified    "
-        $SummaryMessage = "A total of '$ModifiedCount' files has been modified with " + $EOL + " end-of-line (EOL) characters."
+        if ($WhatIf.IsPresent) {
+            $SummaryMessage = @"
+
+No files would have been modified with $EOL end-of-line (EOL) characters.
+"@
+        }
+        else {
+            $SummaryMessage = @"
+
+No files has been modified with $EOL end-of-line (EOL) characters.
+"@
+        }
     }
-
-    $ReportCollection | `
-        Sort-Object -property `
-    @{Expression = "Modified"; Descending = $true}, `
-    @{Expression = "FilePath"; Descending = $false} | `
-        Format-Table `
-    @{Label = "Name    "; Expression = {($_.FilePath)}}, `
-    @{Label = $ColHeaderForModified; Expression = {($_.Modified)}; Alignment = "Left"}, `
-    @{Label = "Reason Not Modified    "; Expression = {
-            if ($_.ExcludedFromIgnoreFile) {
-                "Excluded by ignore file"
-            }
-            elseif ($_.EncodingNotCompatiable) {
-                "Encoding not compatiable - " + $_.FileEncoding.WebName
-            }
-            elseif ($_.SameEOLAsRequested) {
-                "Same EOL as requested"
-            }
-        } ; Alignment = "Left"
-    } -AutoSize
-
     Write-Host $SummaryMessage
 }
 
@@ -310,20 +378,7 @@ function Get-FileObject {
 
     $Data.FilePath = Resolve-Path $FilePath -Relative
 
-    if ($IgnoreHashTable) {
-        $Data.ExcludedFromIgnoreFile = $IgnoreHashTable.PathEntries | ForEach-Object { 
-            if ($FilePath.StartsWith($_)) {$true}
-        } 
-        if ($Data.ExcludedFromIgnoreFile -eq $false) {
-            $Data.FileItem = Get-Item -Path $FilePath -Exclude $IgnoreHashTable.WildEntries
-            if (!$Data.FileItem) {
-                $Data.ExcludedFromIgnoreFile = $true
-            }
-        }
-    }
-    else {
-        $Data.FileItem = Get-Item -Path $FilePath
-    }
+    $Data.FileItem = Get-Item -Path $FilePath
 
     if ($Data.ExcludedFromIgnoreFile -eq $false) {
         [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
@@ -391,12 +446,6 @@ function Write-File {
         if ($Data.WhatIf -eq $false) {
             New-Object -TypeName System.IO.StreamWriter -ArgumentList $Data.FileItem.FullName -OutVariable StreamWriter | Out-null
 
-            # Although the following may be benefical here in some environments:
-            #  $OutputEncoding
-            #  $OFS = $Info.LineEnding
-            #  $StreamWriter.NewLine = $true (although, this is a get/set prop PowerShell
-            #       cant set it)
-            #  $TextWriter.CoreNewLine (StreamWriter inherits from this class)
             if ($Data.EOL -eq 'LF') {
                 $Data.FileContent = $Data.FileContent -replace "`r", ""
                 if ($Data.EndsWithEmptyNewLine) {
