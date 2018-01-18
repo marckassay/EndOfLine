@@ -1,4 +1,38 @@
 $script:ReportCollection
+$script:AcceptableMIME = @(
+    'application/*',
+    'text/*'
+)
+
+function Test-MimeType {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotnullOrEmpty()]
+        [System.IO.FileInfo]$File
+    )
+
+    try {
+        if ($File.Extension) {
+            $Result = [System.Web.MimeMapping]::GetMimeMapping($File.Extension)
+            $Result = $Result.Split("/")[0] + "/*"
+        }
+        else {
+            $Result = $false
+        }
+    }
+    catch {
+        $Result = $false
+    }
+    
+    if ($Result) {
+        $script:AcceptableMIME -contains $Result
+    }
+    else {
+        $Result
+    }
+}
 
 function ConvertTo-LF {
     [CmdletBinding()]
@@ -203,6 +237,8 @@ function Start-ConversionProcess {
             }
         }
 
+        Add-Type -AssemblyName "System.Web"
+
         # ConvertTo-LF -Path E:\Temp\AIT -WhatIf
         <#         
         $IgnoreHashTable.FolderEntries | ForEach-Object {
@@ -252,7 +288,9 @@ function Invoke-RecurseFolders {
     Set-Location -Path $Path
 
     # seems when -File and -Exclude are switched on Get-ChildItem, it doesnt return anything hence the piped Where-Object
-    [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {$_.PSIsContainer -eq $false}
+    [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {
+        ($_.PSIsContainer -eq $false) -and ((Test-MimeType $_) -eq $true)
+    }
     ForEach ($File in $Files) {
         $script:ReportCollection += Get-FileObject `
             -FilePath $File `
@@ -263,7 +301,7 @@ function Invoke-RecurseFolders {
             Out-ReportData
     }
 
-    [string[]]$Folders = Get-ChildItem '.' -Directory -Exclude $IgnoreHashTable.FolderEntries
+    [string[]]$Folders = Get-ChildItem . -Directory -Exclude $IgnoreHashTable.FolderEntries
     ForEach ($Folder in $Folders) {
         Invoke-RecurseFolders -Path $Folder `
             -EOL $EOL `
@@ -386,12 +424,12 @@ function Get-FileObject {
       
         New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-null
 
-        $Data.FileContent = $StreamReader.ReadToEnd();
-        $Data.FileEncoding = $StreamReader.CurrentEncoding;
-        $StreamReader.Dispose()
+        $Data.FileEncoding = $StreamReader.CurrentEncoding
 
         if ($Data.FileEncoding -is [System.Text.UTF8Encoding]) {
             $Data.EncodingNotCompatiable = $false
+            $Data.FileContent = $StreamReader.ReadToEnd()
+            
             $FileAsBytes = [System.Text.Encoding]::UTF8.GetBytes($Data.FileContent)
             $FileAsBytesLength = $FileAsBytes.Length
         }
@@ -403,6 +441,8 @@ function Get-FileObject {
         else {
             $Data.EncodingNotCompatiable = $true
         }
+
+        $StreamReader.Dispose()
         
         if ($Data.EncodingNotCompatiable -eq $false) {
             $IndexOfLF = $FileAsBytes.IndexOf($LF)
