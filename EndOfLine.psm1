@@ -1,38 +1,4 @@
 $script:ReportCollection
-$script:AcceptableMIME = @(
-    'application/*',
-    'text/*'
-)
-
-function Test-MimeType {
-    [CmdletBinding()]
-    Param
-    (
-        [Parameter(Mandatory = $true)]
-        [ValidateNotnullOrEmpty()]
-        [System.IO.FileInfo]$File
-    )
-
-    try {
-        if ($File.Extension) {
-            $Result = [System.Web.MimeMapping]::GetMimeMapping($File.Extension)
-            $Result = $Result.Split("/")[0] + "/*"
-        }
-        else {
-            $Result = $false
-        }
-    }
-    catch {
-        $Result = $false
-    }
-    
-    if ($Result) {
-        $script:AcceptableMIME -contains $Result
-    }
-    else {
-        $Result
-    }
-}
 
 function ConvertTo-LF {
     [CmdletBinding()]
@@ -44,7 +10,7 @@ function ConvertTo-LF {
 
         [switch]$SkipIgnoreFile,
 
-        [switch]$ExperimentalEncodingConversion,
+        # [switch]$ExperimentalEncodingConversion,
 
         [switch]$WhatIf
     )
@@ -75,7 +41,7 @@ function ConvertTo-CRLF {
 
         [switch]$SkipIgnoreFile,
         
-        [switch]$ExperimentalEncodingConversion,
+        # [switch]$ExperimentalEncodingConversion,
 
         [switch]$WhatIf
     )
@@ -236,22 +202,24 @@ function Start-ConversionProcess {
                 throw [System.IO.IOException]::new() 
             }
         }
-
-        Add-Type -AssemblyName "System.Web"
-
-        # ConvertTo-LF -Path E:\Temp\AIT -WhatIf
-        <#         
+        # TODO: report ignored items?
+        <# 
         $IgnoreHashTable.FolderEntries | ForEach-Object {
             $ReportCollection += $_
-        } #>
+        } 
+        #>
         $script:ReportCollection = @()
+
+        Push-Location
 
         Invoke-RecurseFolders -Path $Path[0] `
             -EOL $EOL `
             -IgnoreHashTable $IgnoreHashTable `
             -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
             -WhatIf:$WhatIf.IsPresent
-
+        
+        Pop-Location
+        
         Format-ReportTable -EOL $EOL -WhatIf:$WhatIf.IsPresent
     }
     catch [System.IO.DirectoryNotFoundException] {
@@ -287,10 +255,9 @@ function Invoke-RecurseFolders {
 
     Set-Location -Path $Path
 
-    # seems when -File and -Exclude are switched on Get-ChildItem, it doesnt return anything hence the piped Where-Object
-    [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {
-        ($_.PSIsContainer -eq $false) -and ((Test-MimeType $_) -eq $true)
-    }
+    # seems when -File and -Exclude are switched on Get-ChildItem, it doesnt return 
+    # anything; hence the piped Where-Object to determine if its a file
+    [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {$_.PSIsContainer -eq $false}
     ForEach ($File in $Files) {
         $script:ReportCollection += Get-FileObject `
             -FilePath $File `
@@ -348,14 +315,22 @@ function Format-ReportTable {
         @{Label = "Name    "; Expression = {($_.FilePath)}}, `
         @{Label = $ColHeaderForModified; Expression = {($_.Modified)}; Alignment = "Left"}, `
         @{Label = "Reason Not Modified    "; Expression = {
-                if ($_.ExcludedFromIgnoreFile) {
-                    "Excluded by ignore file"
+                if ($_.EmptyFile) {
+                    "File is empty"
                 }
                 elseif ($_.EncodingNotCompatiable) {
-                    "Encoding not compatiable - " + $_.FileEncoding.WebName
+                    $mesg = "Encoding is not compatiable"
+                    if ($_.FileEncoding) {
+                        $mesg += " - " + $_.FileEncoding
+                    }
+                    $mesg
                 }
                 elseif ($_.SameEOLAsRequested) {
                     "Same EOL as requested"
+                }
+                # TODO: still need this ExcludedFromIgnoreFile?
+                elseif ($_.ExcludedFromIgnoreFile) {
+                    "Excluded by ignore file"
                 }
             } ; Alignment = "Left"
         } -AutoSize
@@ -387,9 +362,6 @@ function Get-FileObject {
         [Parameter(Mandatory = $true)]
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
-
-        [Parameter(Mandatory = $false)]
-        [hashtable]$IgnoreHashTable,
         
         [switch]$ExperimentalEncodingConversion,
 
@@ -403,9 +375,9 @@ function Get-FileObject {
         FileContent                    = ''
         FileEOL                        = ''
         FileEncoding                   = $null
-        ExcludedFromIgnoreFile         = $false
         EncodingNotCompatiable         = $false
         SameEOLAsRequested             = $false
+        EmptyFile                      = $false
         EndsWithEmptyNewLine           = $false
         Modified                       = $false
         ExperimentalEncodingConversion = $ExperimentalEncodingConversion.IsPresent
@@ -413,38 +385,45 @@ function Get-FileObject {
     }
     
     Write-Verbose ("Opening: " + $FilePath)
-
     $Data.FilePath = Resolve-Path $FilePath -Relative
-
     $Data.FileItem = Get-Item -Path $FilePath
+    $Data.EmptyFile = $Data.FileItem.Length -eq 0
 
-    if ($Data.ExcludedFromIgnoreFile -eq $false) {
-        [byte]$CR = 0x0D # 13  or  \r\n  or  `r`n
-        [byte]$LF = 0x0A # 10  or  \n    or  `n
-      
-        New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName -OutVariable StreamReader | Out-null
+    if ($Data.EmptyFile -eq $false) {
+        # unicode: U+000D | byte (decimal): 13 | html: \r\n | powershell: `r`n
+        [byte]$CR = 0x0D
+        # unicode: U+000A | byte (decimal): 10 | html: \n | powershell: `n
+        [byte]$LF = 0x0A
+        # TODO: would be nice to pipe StreamReader into Test-Encoding...
+        $Data.EncodingNotCompatiable = !(Test-Encoding -Path $Data.FileItem.FullName)
 
-        $Data.FileEncoding = $StreamReader.CurrentEncoding
+        if ( $Data.EncodingNotCompatiable -eq $false) {
+            # TODO: Currently Get-Bom isnt returning all values
+            if ((Get-Bom -Path $Data.FileItem.FullName) -like "utf16*") {
+                $Data.EncodingNotCompatiable = $true
+                $Data.FileEncoding = 'UTF-16' 
+            }
+        } 
 
-        if ($Data.FileEncoding -is [System.Text.UTF8Encoding]) {
-            $Data.EncodingNotCompatiable = $false
-            $Data.FileContent = $StreamReader.ReadToEnd()
-            
-            $FileAsBytes = [System.Text.Encoding]::UTF8.GetBytes($Data.FileContent)
-            $FileAsBytesLength = $FileAsBytes.Length
-        }
-        elseif (($Data.ExperimentalEncodingConversion -eq $true) -and ($Data.FileEncoding -is [System.Text.UnicodeEncoding])) {
-            $Data.EncodingNotCompatiable = $false
-            $FileAsBytes = [System.Text.Encoding]::ASCII.GetBytes($Data.FileContent)
-            $FileAsBytesLength = $FileAsBytes.Length
-        }
-        else {
-            $Data.EncodingNotCompatiable = $true
-        }
-
-        $StreamReader.Dispose()
-        
         if ($Data.EncodingNotCompatiable -eq $false) {
+
+            $StreamReader = New-Object -TypeName System.IO.StreamReader -ArgumentList $Data.FileItem.FullName
+            
+            $Data.FileEncoding = $StreamReader.CurrentEncoding
+            
+            if ($Data.FileEncoding -is [System.Text.UTF8Encoding]) {
+            
+                $Data.FileContent = $StreamReader.ReadToEnd()
+            
+                $FileAsBytes = [System.Text.Encoding]::UTF8.GetBytes($Data.FileContent)
+                $FileAsBytesLength = $FileAsBytes.Length
+            }
+            elseif ($Data.FileEncoding -is [System.Text.UnicodeEncoding]) {
+                $Data.EncodingNotCompatiable = $false
+                $FileAsBytes = [System.Text.Encoding]::Unicode.GetBytes($Data.FileContent)
+                $FileAsBytesLength = $FileAsBytes.Length
+            }
+
             $IndexOfLF = $FileAsBytes.IndexOf($LF)
             if (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -ne $CR)) {
                 $Data.FileEOL = 'LF'
@@ -465,6 +444,8 @@ function Get-FileObject {
             }
 
             $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
+
+            $StreamReader.Close()
         }
     }
 
@@ -479,8 +460,8 @@ function Write-File {
         [PSCustomObject]$Data
     )
 
-    if (($Data.ExcludedFromIgnoreFile -eq $false) -and `
-        ($Data.SameEOLAsRequested -eq $false) -and `
+    if (($Data.SameEOLAsRequested -eq $false) -and `
+        ($Data.EmptyFile -eq $false) -and `
         ($Data.EncodingNotCompatiable -eq $false)) {
  
         if ($Data.WhatIf -eq $false) {
@@ -533,8 +514,8 @@ function Out-ReportData {
         }
     }
     else {
-        if ($Data.ExcludedFromIgnoreFile) {
-            Write-Verbose ("  This file has been excluded per ignore file: " + $Data.FilePath)
+        if ($Data.EmptyFile) {
+            Write-Verbose ("  This file has been excluded since it is empty.") 
         }
         elseif ($Data.SameEOLAsRequested) {
             Write-Verbose ("  This file has been excluded since the end-of-line characters are the same as requested to convert.") 
