@@ -12,9 +12,8 @@ Objective of this module is conversion of end-of-line (EOL) characters: CRLF to 
 
 ## Caveat
 
-* Current issue with using `gitignore` file.
 * The nature of this module may be destructive in some situations.  Please have backup plan in place before executing.
-* Files are expected to be encoded in UTF-8.  If encoded in anything else it will not be modified unless called with `ExperimentalEncodingConversion` switch.  This switch *may* safely convert UTF-16 into UTF-8.  If it does safey convert the encoding, some diff editors (perhaps all) will show the file's bytes not decoded (which is expected) before the modification.  Until I have a better understanding of decoding and encoding Unicode files I will keep this switch as-is.
+* Files are expected to be encoded in UTF-8.  If encoded in anything else it will not be modified.
 
 ## Instructions
 
@@ -24,19 +23,24 @@ To install, run the following command in PowerShell.
 $ Install-Module EndOfLine
 ```
 
+This module has 'Encoding' as a dependency that should be installed automatically.
+
+[![PS Gallery](https://img.shields.io/badge/Encoding-PS%20Gallery-blue.svg)](https://www.powershellgallery.com/packages/Encoding)
+
 ## Usage
 
 ### ConvertTo-LF
 
 Converts CRLF to LF characters.
-This function will recursively read all files within the `Path` unless excluded by `.gitignore` file.  If a file is not excluded it is read to see if the current EOL character is the same as requested.  If so it will not modify the file.  And if the encoding is not compatible with UTF-8 (unless called with `ExperimentalEncodingConversion` switch), these files will also not be modified.
-Using the `WhatIf`, `ExperimentalEncodingConversion` and `Verbose` switch.
+This function will recursively read all files within the `Path` unless excluded by `.gitignore` file.  If a file is not excluded it is read to see if the current EOL character is the same as requested.  If so it will not modify the file.
+
+Example using the `WhatIf`, and `Verbose` switch.
 
 ```powershell
 $ ConvertTo-LF -Path C:\repos\AiT -WhatIf -ExperimentalEncodingConversion -Verbose
 ```
 
-If you agree when prompted, files will be modified without import of `.gitignore` file.
+For this example, if you agree when prompted files will be modified without import of `.gitignore` file.
 
 ```powershell
 $ ConvertTo-LF -Path C:\repos\AiT -SkipIgnoreFile
