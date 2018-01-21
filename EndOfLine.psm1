@@ -2,60 +2,61 @@ $script:ReportCollection
 
 function ConvertTo-LF {
     [CmdletBinding()]
-    [OutputType([$null], ParameterSetName="Path")]
-    [OutputType([PsCustomObject], ParameterSetName="FilePath")]
     Param
     (
-        [Parameter(Mandatory=$true,
-        ParameterSetName="Path")]
+        [Parameter(Mandatory = $true,
+            ValueFromPipeline = $true)]
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
-        [Parameter(Mandatory=$true,
-        ParameterSetName="FilePath")]
-        [ValidateNotNullOrEmpty()]
-        [string]$FilePath,
-
         [switch]$SkipIgnoreFile,
+
+        [switch]$ExportReportData,
 
         [switch]$WhatIf
     )
-    Convert-EOL -Path $Path -EOL 'LF' -SkipIgnoreFile:$SkipIgnoreFile.IsPresent -WhatIf:$WhatIf.IsPresent
+    $Path | Convert-EOL -EOL 'LF' `
+        -SkipIgnoreFile:$SkipIgnoreFile.IsPresent `
+        -ExportReportData:$ExportReportData.IsPresent `
+        -WhatIf:$WhatIf.IsPresent
 }
 
 function ConvertTo-CRLF {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory=$true,
-        ParameterSetName="Path")]
+        [Parameter(Mandatory = $true,
+            ValueFromPipeline = $true)]
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
-        [Parameter(Mandatory=$true,
-        ParameterSetName="FilePath")]
-        [ValidateNotNullOrEmpty()]
-        [string]$FilePath,
-
         [switch]$SkipIgnoreFile,
+
+        [switch]$ExportReportData,
 
         [switch]$WhatIf
     )
-    Convert-EOL -Path $Path -EOL 'CRLF' -SkipIgnoreFile:$SkipIgnoreFile.IsPresent -WhatIf:$WhatIf.IsPresent
+    $Path | Convert-EOL -EOL 'CRLF' `
+        -SkipIgnoreFile:$SkipIgnoreFile.IsPresent `
+        -ExportReportData:$ExportReportData.IsPresent `
+        -WhatIf:$WhatIf.IsPresent
 }
 
 function Convert-EOL {
     [CmdletBinding()]
     Param
     (
-        [Parameter(Mandatory = $true)]
-        [ValidateNotnullOrEmpty()]
+        [Parameter(Mandatory = $true,
+            ValueFromPipeline = $true)]
+        [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
         [switch]$SkipIgnoreFile,
+
+        [switch]$ExportReportData,
 
         [switch]$WhatIf
     )
@@ -68,8 +69,11 @@ function Convert-EOL {
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL $EOL -IgnoreHashTable $IgnoreHashTable `
-            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
+        Start-ConversionProcess -Path $Path `
+            -EOL $EOL `
+            -IgnoreHashTable $IgnoreHashTable `
+            -ExportReportData:$ExportReportData.IsPresent `
+            -WhatIf:$WhatIf.IsPresent
     }
     else {
         Write-Output -InputObject "Operation has been cancelled, no files have been modified."
@@ -81,16 +85,22 @@ function Import-GitIgnoreFile {
     Param
     (
         [Parameter(Mandatory = $true, Position = 1)]
-        [ValidateNotnullOrEmpty()]
+        [ValidateNotNullOrEmpty()]
         [string[]]$Path
     )
     
     try {
         Push-Location
-        $Path | Set-Location
+        if ($Path | Test-Path -PathType Container) {
+            $Path | Set-Location
+            $IgnoreFile = Get-ChildItem -Path . -Recurse -Depth 3 -Filter ".gitignore" | Select-Object -First 1
+        }
+        else {
+            $Path | Get-ItemPropertyValue -Name DirectoryName #| Set-Location
+            $IgnoreFile = Get-ParentItem -Path $Path -Name '.gitignore' -Recurse
+        }
 
-        $GitIgnoreContents = Get-ChildItem -Path . -Recurse -Depth 1 -Filter ".gitignore" -OutVariable IgnoreFile | `
-            Select-Object -First 1 | `
+        $GitIgnoreContents = $IgnoreFile | `
             Get-Content | `
             Where-Object {($_.Length -gt 0) -and ($_.StartsWith('#') -ne $true)}
 
@@ -132,6 +142,37 @@ function Import-GitIgnoreFile {
     }
     catch {
 
+    }
+}
+
+function Get-ParentItem {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $true, Position = 1)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Path,
+
+        [Parameter(Mandatory = $true, Position = 2)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [switch]$Recurse
+    )
+
+    if ($Path | Test-Path -PathType Leaf) {
+        $Path = $Path | Get-ItemPropertyValue -Name DirectoryName
+    }
+
+    $CurrentDirectory = $(Get-Item $Path)
+    
+    $FoundItem = Get-ChildItem -Path $CurrentDirectory -Filter $Name
+
+    if (($Recurse.IsPresent -eq $true) -and ($FoundItem -eq $null) -and ($CurrentDirectory.Parent.FullName -ne $null)) {
+        Get-ParentItem -Path $CurrentDirectory.Parent.FullName -Name $Name -Recurse
+    }
+    else {
+        $FoundItem
     }
 }
 
@@ -190,32 +231,21 @@ function Start-ConversionProcess {
     Param
     (
         [Parameter(Mandatory = $true)]
-        [ValidateNotnullOrEmpty()]
+        [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
         [Parameter(Mandatory = $false)]
-        [hashtable]$IgnoreHashTable,
+        [object[]]$IgnoreHashTable,
 
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
-        [switch]$ExperimentalEncodingConversion,
+        [switch]$ExportReportData,
 
         [switch]$WhatIf
     )
     
     try {
-        if ((Test-Path $Path) -eq $false) {
-            if (Test-Path -PathType Container -IsValid) {
-                throw [System.IO.DirectoryNotFoundException]::new()
-            }
-            elseif (Test-Path -PathType Leaf -IsValid) {
-                throw [System.IO.FileNotFoundException]::new()
-            }
-            else {
-                throw [System.IO.IOException]::new() 
-            }
-        }
         # TODO: report ignored items?
         <# 
         $IgnoreHashTable.FolderEntries | ForEach-Object {
@@ -225,30 +255,61 @@ function Start-ConversionProcess {
         $script:ReportCollection = @()
 
         Push-Location
+      
+        if (($Path | Test-Path) -eq $false) {
+            if ($Path | Test-Path -PathType Container -IsValid) {
+                throw [System.IO.DirectoryNotFoundException]::new()
+            }
+            elseif ($Path | Test-Path -PathType Leaf -IsValid) {
+                throw [System.IO.FileNotFoundException]::new()
+            }
+            else {
+                throw [System.IO.IOException]::new() 
+            }
+        }
+        else {
+            if ($Path | Test-Path -PathType Container) {
+                Invoke-RecurseFolders -Path $Path[0] `
+                    -EOL $EOL `
+                    -IgnoreHashTable $IgnoreHashTable `
+                    -WhatIf:$WhatIf.IsPresent
+            }
+            else {
+                $script:ReportCollection += Get-FileObject `
+                    -FilePath $Path[0] `
+                    -EOL $EOL `
+                    -WhatIf:$WhatIf.IsPresent | `
+                    Write-File | `
+                    Out-ReportData
+            }
+        }
 
-        Invoke-RecurseFolders -Path $Path[0] `
-            -EOL $EOL `
-            -IgnoreHashTable $IgnoreHashTable `
-            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
-            -WhatIf:$WhatIf.IsPresent
-        
         Pop-Location
         
-        Format-ReportTable -EOL $EOL -WhatIf:$WhatIf.IsPresent
+        if ($ExportReportData.IsPresent -eq $false) {
+            Format-ReportTable -EOL $EOL -WhatIf:$WhatIf.IsPresent
+        }
+        else {
+            $script:ReportCollection
+        }
     }
     catch [System.IO.DirectoryNotFoundException] {
         Write-Error -Message ("The following directory cannot be found: $Path")
+        Pop-Location
     }
     catch [System.IO.FileNotFoundException] {
         Write-Error -Message ("The following file cannot be found: $Path")
+        Pop-Location
     }
     catch [System.IO.IOException] {
         Write-Error -Message ("The following is invalid: $Path")
+        Pop-Location
     }
 }
 
+# NOTE: Algorithm by Brian Nadjiwon:
 # https://social.technet.microsoft.com/Forums/windowsserver/en-US/71a473c7-7cee-4c48-ab02-491703aa1f5f/getchilditem-with-millions-of-files
-# Brian Nadjiwon
+# 
 function Invoke-RecurseFolders {
     [CmdletBinding()]
     Param
@@ -260,17 +321,15 @@ function Invoke-RecurseFolders {
         [string]$EOL,
 
         [Parameter(Mandatory = $false)]
-        [hashtable]$IgnoreHashTable,
-
-        [switch]$ExperimentalEncodingConversion,
+        [object[]]$IgnoreHashTable,
 
         [switch]$WhatIf
     )
 
     Set-Location -Path $Path
-    # when -File and -Exclude are switched on Get-ChildItem, it doesnt return 
+    # HACK: when -File and -Exclude are switched on Get-ChildItem, it doesnt return 
     # anything; hence the piped Where-Object to determine if its a file.  This
-    # seems to be fixed on PowerShell Core 6.0.0
+    # seems to be fixed in PowerShell Core 6.0.0
     #
     # https://github.com/PowerShell/PowerShell/issues/5699
     #
@@ -279,7 +338,6 @@ function Invoke-RecurseFolders {
         $script:ReportCollection += Get-FileObject `
             -FilePath $File `
             -EOL $EOL `
-            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
             -WhatIf:$WhatIf.IsPresent | `
             Write-File | `
             Out-ReportData
@@ -290,7 +348,6 @@ function Invoke-RecurseFolders {
         Invoke-RecurseFolders -Path $Folder `
             -EOL $EOL `
             -IgnoreHashTable $IgnoreHashTable `
-            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent `
             -WhatIf:$WhatIf.IsPresent
 
         Set-Location -Path '..'
@@ -345,10 +402,6 @@ function Format-ReportTable {
                 elseif ($_.SameEOLAsRequested) {
                     "Same EOL as requested"
                 }
-                # TODO: still need this ExcludedFromIgnoreFile?
-                elseif ($_.ExcludedFromIgnoreFile) {
-                    "Excluded by ignore file"
-                }
             } ; Alignment = "Left"
         } -AutoSize
     }
@@ -380,25 +433,22 @@ function Get-FileObject {
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
         
-        [switch]$ExperimentalEncodingConversion,
-
         [switch]$WhatIf
     )
 
     $Data = [PsCustomObject]@{
-        EOL                            = $EOL
-        FilePath                       = ''
-        FileItem                       = $null
-        FileContent                    = ''
-        FileEOL                        = ''
-        FileEncoding                   = $null
-        EncodingNotCompatiable         = $false
-        SameEOLAsRequested             = $false
-        EmptyFile                      = $false
-        EndsWithEmptyNewLine           = $false
-        Modified                       = $false
-        ExperimentalEncodingConversion = $ExperimentalEncodingConversion.IsPresent
-        WhatIf                         = $WhatIf.IsPresent
+        EOL                    = $EOL
+        FilePath               = ''
+        FileItem               = $null
+        FileContent            = ''
+        FileEOL                = ''
+        FileEncoding           = $null
+        EncodingNotCompatiable = $false
+        SameEOLAsRequested     = $false
+        EmptyFile              = $false
+        EndsWithEmptyNewLine   = $false
+        Modified               = $false
+        WhatIf                 = $WhatIf.IsPresent
     }
     
     Write-Verbose ("Opening: " + $FilePath)
@@ -495,11 +545,11 @@ function Write-File {
                 Write-Error ("EndOfLine threw an exception when writing to: " + $Data.FileItem.FullName)
             }
         }
-
         $Data.Modified = $true
-        # free-up memory; no longer need FileContent data
-        $Data.FileContent = ''
     }
+    # free-up memory; no longer need FileContent data
+    $Data.FileContent = '[removed]'
+    
     $Data
 }
 
