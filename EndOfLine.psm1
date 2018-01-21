@@ -2,36 +2,49 @@ $script:ReportCollection
 
 function ConvertTo-LF {
     [CmdletBinding()]
+    [OutputType([$null], ParameterSetName="Path")]
+    [OutputType([PsCustomObject], ParameterSetName="FilePath")]
     Param
     (
-        [Parameter(Mandatory = $true)]
-        [ValidateNotnullOrEmpty()]
+        [Parameter(Mandatory=$true,
+        ParameterSetName="Path")]
+        [ValidateNotNullOrEmpty()]
         [string[]]$Path,
+
+        [Parameter(Mandatory=$true,
+        ParameterSetName="FilePath")]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilePath,
 
         [switch]$SkipIgnoreFile,
 
-        # [switch]$ExperimentalEncodingConversion,
-
         [switch]$WhatIf
     )
-
-    if ($SkipIgnoreFile.IsPresent -eq $false) {
-        $IgnoreHashTable = Import-GitIgnoreFile $Path
-    }
-
-    $ConfirmationMessage = New-ConfirmationMessage -EOL "LF" -WhatIf:$WhatIf.IsPresent
-    $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
-
-    if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL "LF" -IgnoreHashTable $IgnoreHashTable `
-            -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
-    }
-    else {
-        Write-Output -InputObject "Operation has been cancelled, no files have been modified."
-    }
+    Convert-EOL -Path $Path -EOL 'LF' -SkipIgnoreFile:$SkipIgnoreFile.IsPresent -WhatIf:$WhatIf.IsPresent
 }
 
 function ConvertTo-CRLF {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory=$true,
+        ParameterSetName="Path")]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Path,
+
+        [Parameter(Mandatory=$true,
+        ParameterSetName="FilePath")]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilePath,
+
+        [switch]$SkipIgnoreFile,
+
+        [switch]$WhatIf
+    )
+    Convert-EOL -Path $Path -EOL 'CRLF' -SkipIgnoreFile:$SkipIgnoreFile.IsPresent -WhatIf:$WhatIf.IsPresent
+}
+
+function Convert-EOL {
     [CmdletBinding()]
     Param
     (
@@ -39,9 +52,10 @@ function ConvertTo-CRLF {
         [ValidateNotnullOrEmpty()]
         [string[]]$Path,
 
+        [ValidateSet("LF", "CRLF")]
+        [string]$EOL,
+
         [switch]$SkipIgnoreFile,
-        
-        # [switch]$ExperimentalEncodingConversion,
 
         [switch]$WhatIf
     )
@@ -50,11 +64,11 @@ function ConvertTo-CRLF {
         $IgnoreHashTable = Import-GitIgnoreFile $Path
     }
 
-    $ConfirmationMessage = New-ConfirmationMessage -EOL "CRLF" -WhatIf:$WhatIf.IsPresent
+    $ConfirmationMessage = New-ConfirmationMessage -EOL $EOL -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
     if ($Decision -eq $true) {
-        Start-ConversionProcess -Path $Path -EOL "CRLF" -IgnoreHashTable $IgnoreHashTable `
+        Start-ConversionProcess -Path $Path -EOL $EOL -IgnoreHashTable $IgnoreHashTable `
             -ExperimentalEncodingConversion:$ExperimentalEncodingConversion.IsPresent -WhatIf:$WhatIf.IsPresent
     }
     else {
@@ -102,7 +116,7 @@ function Import-GitIgnoreFile {
 
         Pop-Location
 
-        # since .git folder are not listed in .gitignore, add it to FolderEntries
+        # since .git folder is not listed in .gitignore, add it to FolderEntries
         $FolderEntries += '.git'
         
         $IgnoreHashTable = @{
@@ -254,9 +268,12 @@ function Invoke-RecurseFolders {
     )
 
     Set-Location -Path $Path
-
-    # seems when -File and -Exclude are switched on Get-ChildItem, it doesnt return 
-    # anything; hence the piped Where-Object to determine if its a file
+    # when -File and -Exclude are switched on Get-ChildItem, it doesnt return 
+    # anything; hence the piped Where-Object to determine if its a file.  This
+    # seems to be fixed on PowerShell Core 6.0.0
+    #
+    # https://github.com/PowerShell/PowerShell/issues/5699
+    #
     [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {$_.PSIsContainer -eq $false}
     ForEach ($File in $Files) {
         $script:ReportCollection += Get-FileObject `
@@ -395,15 +412,7 @@ function Get-FileObject {
         # unicode: U+000A | byte (decimal): 10 | html: \n | powershell: `n
         [byte]$LF = 0x0A
         # TODO: would be nice to pipe StreamReader into Test-Encoding...
-        $Data.EncodingNotCompatiable = !(Test-Encoding -Path $Data.FileItem.FullName)
-
-        if ( $Data.EncodingNotCompatiable -eq $false) {
-            # TODO: Currently Get-Bom isnt returning all values
-            if ((Get-Bom -Path $Data.FileItem.FullName) -like "utf16*") {
-                $Data.EncodingNotCompatiable = $true
-                $Data.FileEncoding = 'UTF-16' 
-            }
-        } 
+        $Data.EncodingNotCompatiable = !(Test-Encoding -Path $Data.FileItem.FullName 'utf8')
 
         if ($Data.EncodingNotCompatiable -eq $false) {
 
@@ -418,11 +427,6 @@ function Get-FileObject {
                 $FileAsBytes = [System.Text.Encoding]::UTF8.GetBytes($Data.FileContent)
                 $FileAsBytesLength = $FileAsBytes.Length
             }
-            elseif ($Data.FileEncoding -is [System.Text.UnicodeEncoding]) {
-                $Data.EncodingNotCompatiable = $false
-                $FileAsBytes = [System.Text.Encoding]::Unicode.GetBytes($Data.FileContent)
-                $FileAsBytesLength = $FileAsBytes.Length
-            }
 
             $IndexOfLF = $FileAsBytes.IndexOf($LF)
             if (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -ne $CR)) {
@@ -431,6 +435,8 @@ function Get-FileObject {
                     $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
                     ($FileAsBytes.Get($FileAsBytesLength - 2) -eq $LF)
                 }
+
+                $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
             }
             elseif (($IndexOfLF -ne -1) -and ($FileAsBytes[$IndexOfLF - 1] -eq $CR)) {
                 $Data.FileEOL = 'CRLF'
@@ -438,13 +444,13 @@ function Get-FileObject {
                     $Data.EndsWithEmptyNewLine = ($FileAsBytes.Get($FileAsBytesLength - 1) -eq $LF) -and `
                     ($FileAsBytes.Get($FileAsBytesLength - 3) -eq $LF)
                 }
+
+                $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
             }
             else {
                 $Data.FileEOL = 'unknown'
             }
-
-            $Data.SameEOLAsRequested = $Data.FileEOL -eq $Data.EOL
-
+            
             $StreamReader.Close()
         }
     }
