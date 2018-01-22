@@ -1,4 +1,5 @@
 $script:ReportCollection
+$script:SUT = $false
 
 function ConvertTo-LF {
     [CmdletBinding()]
@@ -221,7 +222,12 @@ function Request-Confirmation {
     $No = [System.Management.Automation.Host.ChoiceDescription]::new("&No")
     $No.HelpMessage = "Aborts operation"
 
-    [bool]$Decision = !($Host.UI.PromptForChoice($Message, $Question, @($Yes, $No), 1))
+    if ($script:SUT -eq $false) {
+        [bool]$Decision = !($Host.UI.PromptForChoice($Message, $Question, @($Yes, $No), 1))
+    }
+    else {
+        [bool]$Decision = $true
+    }
 
     $Decision
 }
