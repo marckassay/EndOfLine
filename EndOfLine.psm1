@@ -37,19 +37,19 @@ Will do the same operations as if not switched except writing to the file.
 .EXAMPLE
 The path being used in this example will, assume that there is a .gitignore in it or depth or two below.
 
-ConvertTo-LF C:\repos\sots -WhatIf
+ConvertTo-CRLF C:\repos\sots -WhatIf
 
 .EXAMPLE
-If the repo has a .gitignore file, skip it and just exclude the 'modules' folder that is specified in 
+If the repo has a .gitignore file, skip it and just exclude modules folder that is specified in 
 -Exclude parameter.
 
-ConvertTo-LF C:\repos\sots -Exclude .\modules\ -SkipIgnoreFile -WhatIf
+ConvertTo-CRLF C:\repos\sots -Exclude .\modules\, .\node_modules\ -SkipIgnoreFile -WhatIf
 
 .EXAMPLE
 Having the -Verbose switched it will continue the parsing a .gitignore file it there is one, and will 
 prompt before proceeding to convert files.
 
-ConvertTo-LF C:\repos\sots -Verbose
+ConvertTo-CRLF C:\repos\sots -Verbose
 
 .NOTES
 General notes
@@ -121,10 +121,10 @@ The path being used in this example will, assume that there is a .gitignore in i
 ConvertTo-CRLF C:\repos\sots -WhatIf
 
 .EXAMPLE
-If the repo has a .gitignore file, skip it and just exclude the 'modules' folder that is specified in 
+If the repo has a .gitignore file, skip it and just exclude modules folder that is specified in 
 -Exclude parameter.
 
-ConvertTo-CRLF C:\repos\sots -Exclude .\modules\ -SkipIgnoreFile -WhatIf
+ConvertTo-CRLF C:\repos\sots -Exclude .\modules\, .\node_modules\ -SkipIgnoreFile -WhatIf
 
 .EXAMPLE
 Having the -Verbose switched it will continue the parsing a .gitignore file it there is one, and will 
@@ -258,93 +258,7 @@ function Import-GitIgnoreFile {
         $GitIgnoreContents
     }
     catch {
-
-    }
-}
-
-<#
-.SYNOPSIS
-Returns a valid path from a parent of one of its children which overlaps that parent's path.
-
-.DESCRIPTION
-In set-theory this will be considered a relative complement.  That is the directories
-in ChildPath that are not in Path.
-
-A diagram to illustrate what is mentioned above:
-    A =        C:\Windows\diagnostics\system
-    B =                 .\diagnostics\system\Keyboard\en-US\CL_LocalizationData.psd1
-    B\A =                                  .\Keyboard\en-US\CL_LocalizationData.psd1
-    R =        C:\Windows\diagnostics\system\Keyboard\en-US\CL_LocalizationData.psd1
-
-The path 'R' is what will be returned if -IsValid is not switched otherwise $true 
-will be returned.
-
-.PARAMETER Path
-Parent path of $ChildPath.  This can be relative.
-
-.PARAMETER ChildPath
-Child path of $Path.
-
-.PARAMETER IsValid
-Returns true if function found a complement folder.  False is returned if no complement was
-found.
-
-.EXAMPLE
-Demonstration of using Get-MergedPath with truthly values
-
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg
-E:\Temp\AIT\resources\android\AiT-Feature.jpg
-
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg -IsValid
-True
-
-.EXAMPLE
-Demonstration of using Get-MergedPath with falsely values
-
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reWWWources\android\AiT-Feature.jpg
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reWWWources\android\AiT-Feature.jpg -IsValid
-False
-
-.LINK
-https://gist.github.com/marckassay/2f54ae68779c9f27fd130b193374335c
-#>
-function Get-MergedPath {
-    [CmdletBinding()]
-    [OutputType([string])]
-    [OutputType([bool])]
-    Param
-    (
-        [Parameter(Mandatory = $true,
-            Position = 0,
-            ValueFromPipeline = $false)]
-        [ValidateNotNullOrEmpty()]
-        [string[]]$Path,
-
-        [Parameter(Mandatory = $true,
-            Position = 1,
-            ValueFromPipeline = $false)]
-        [ValidateNotNullOrEmpty()]
-        [string[]]$ChildPath,
-
-        [switch]$IsValid
-    )
-
-    $ParentBaseName = Get-Item $Path | Get-ItemPropertyValue -Name BaseName
-    $ChildBaseName = Split-Path -Path $ChildPath
-
-    if ($ChildBaseName.replace('\', '\\') -match $ParentBaseName ) {
-        if ($IsValid.IsPresent) {
-            $true
-        }
-        else {
-            Join-Path $Path -ChildPath $($ChildPath.Split($ParentBaseName)[1])
-        }
-        
-    }
-    else {
-        if ($IsValid.IsPresent) {
-            $false
-        }
+        Write-Error "An error occurred with importing and parsing .gitignore file."
     }
 }
 
@@ -358,7 +272,7 @@ function New-IgnoreHashTable {
         [string[]]$Contents
     )
 
-    # since .git folder is not listed in .gitignore, add it to FolderEntries
+    # since .git folder is not listed in .gitignore, add it here
     $Contents += '.git/'
     $FolderEntries = @()
     $FileEntries = @()
@@ -414,99 +328,6 @@ function New-IgnoreHashTable {
         FileEntries   = $FileEntries
     }
     $IgnoreHashTable
-}
-
-<#
-.SYNOPSIS
-Similarly to Get-ChildItem, this function can recurse the -Path parameter parent or parents
-for a file or folder
-
-.DESCRIPTION
-Long description
-
-.PARAMETER Path
-The path to start
-
-.PARAMETER Name
-The name of the item to seek for.  Must include extention of file.
-
-.PARAMETER Recurse
-If not switched, it will only look at the directory above -Path.
-
-.PARAMETER File
-Seems to be ineffective
-
-.PARAMETER Directory
-Seems to be ineffective
-
-.PARAMETER Force
-Seems to be ineffective
-
-.EXAMPLE
-Using this function piped with Test-Path
-
-E:\> Get-ParentItem E:\Temp\AIT\src\pages\  -Name '.gitignore'  -Verbose -Recurse | Test-Path -PathType Leaf
-VERBOSE: Starting with: E:\Temp\AIT\src\pages\
-VERBOSE:   CurrentDirectory var is: E:\Temp\AIT\src\pages\
-VERBOSE:   Found item, if there is one:
-VERBOSE:   Recursing function with: E:\Temp\AIT\src
-VERBOSE: Starting with: E:\Temp\AIT\src
-VERBOSE:   CurrentDirectory var is: E:\Temp\AIT\src
-VERBOSE:   Found item, if there is one:
-VERBOSE:   Recursing function with: E:\Temp\AIT
-VERBOSE: Starting with: E:\Temp\AIT
-VERBOSE:   CurrentDirectory var is: E:\Temp\AIT
-VERBOSE:   Found item, if there is one: .gitignore
-True
-E:\>
-
-.LINK
-https://gist.github.com/marckassay/76a7560e7c7f9b320fb3aa12e663631b
-
-.NOTES
-General notes
-#>
-function Get-ParentItem {
-    [CmdletBinding()]
-    Param
-    (
-        [Parameter(Mandatory = $true, Position = 1)]
-        [ValidateNotNullOrEmpty()]
-        [string[]]$Path,
-
-        [Parameter(Mandatory = $true, Position = 2)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Name,
-
-        [switch]$Recurse,
-        [switch]$File,
-        [switch]$Directory,
-        [switch]$Force
-    )
-
-    Write-Verbose ("Starting with: $Path")
-    if ($Path | Test-Path -PathType Leaf) {
-        Write-Verbose ("  this is a leaf, getting its directory name...")
-        $Path = $Path | Get-ItemPropertyValue -Name DirectoryName
-        Write-Verbose ("  now using: $Path")
-    }
-    
-    $CurrentDirectory = $(Get-Item $Path)
-    Write-Verbose ("  CurrentDirectory var is: $CurrentDirectory")
-    $FoundItem = Get-ChildItem -Path $CurrentDirectory `
-        -Filter $Name `
-        -File:$File.IsPresent `
-        -Directory:$Directory.IsPresent `
-        -Force:$Force.IsPresent
-    Write-Verbose ("  Found item, if there is one: $FoundItem")
-    
-    if (($Recurse.IsPresent -eq $true) -and ($FoundItem -eq $null) -and ($CurrentDirectory.Parent.FullName -ne $null)) {
-        Write-Verbose ("  Recursing function with: " + $CurrentDirectory.Parent.FullName)
-        Get-ParentItem -Path $CurrentDirectory.Parent.FullName -Name $Name -Recurse
-    }
-    else {
-        $FoundItem
-    }
 }
 
 function New-ConfirmationMessage {
