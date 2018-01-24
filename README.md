@@ -56,3 +56,7 @@ $ ConvertTo-LF -Path C:\repos\AiT
 
 Converts LF to CRLF characters.
 Besides the characters that will be replaced, all things that apply in `ConvertTo-LF` apply to this function too.
+
+##
+Get-PartentPath 
+convert child folder and it will find parent .gitignore file.

@@ -1,5 +1,5 @@
-$script:ReportCollection
 $script:SUT = $false
+$script:ReportCollection
 
 function ConvertTo-LF {
     [CmdletBinding()]
@@ -10,6 +10,11 @@ function ConvertTo-LF {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
+        [Parameter(Mandatory = $false,
+            ValueFromPipeline = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Exclude,
+
         [switch]$SkipIgnoreFile,
 
         [switch]$ExportReportData,
@@ -17,6 +22,7 @@ function ConvertTo-LF {
         [switch]$WhatIf
     )
     $Path | Convert-EOL -EOL 'LF' `
+        -Exclude $Exclude `
         -SkipIgnoreFile:$SkipIgnoreFile.IsPresent `
         -ExportReportData:$ExportReportData.IsPresent `
         -WhatIf:$WhatIf.IsPresent
@@ -31,6 +37,11 @@ function ConvertTo-CRLF {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
+        [Parameter(Mandatory = $false,
+            ValueFromPipeline = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Exclude,
+
         [switch]$SkipIgnoreFile,
 
         [switch]$ExportReportData,
@@ -38,6 +49,7 @@ function ConvertTo-CRLF {
         [switch]$WhatIf
     )
     $Path | Convert-EOL -EOL 'CRLF' `
+        -Exclude $Exclude `
         -SkipIgnoreFile:$SkipIgnoreFile.IsPresent `
         -ExportReportData:$ExportReportData.IsPresent `
         -WhatIf:$WhatIf.IsPresent
@@ -52,6 +64,10 @@ function Convert-EOL {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path,
 
+        [Parameter(Mandatory = $false,
+            ValueFromPipeline = $false)]
+        [string[]]$Exclude,
+
         [ValidateSet("LF", "CRLF")]
         [string]$EOL,
 
@@ -62,10 +78,32 @@ function Convert-EOL {
         [switch]$WhatIf
     )
 
-    if ($SkipIgnoreFile.IsPresent -eq $false) {
-        $IgnoreHashTable = Import-GitIgnoreFile $Path
-    }
+    if ($Path | Test-Path -PathType Container) {
+        Push-Location
+        $Path | Set-Location
 
+        if (($SkipIgnoreFile.IsPresent -eq $false) -and (!$Exclude)) {
+            $GitIgnoreContents = Import-GitIgnoreFile $Path
+            if ($GitIgnoreContents) {
+                $IgnoreHashTable = New-IgnoreHashTable $GitIgnoreContents
+            }
+        }
+        elseif (($SkipIgnoreFile.IsPresent -eq $false) -and ($Exclude)) {
+            $GitIgnoreContents = Import-GitIgnoreFile $Path
+            if ($GitIgnoreContents) {
+                $ArrayList = New-Object System.Collections.ArrayList
+                $ArrayList.AddRange($GitIgnoreContents)
+                $ArrayList.AddRange($Exclude)
+                [string[]]$GitAndExcludeContents = $ArrayList.ToArray()
+                $IgnoreHashTable = New-IgnoreHashTable $GitAndExcludeContents
+            }
+        }
+        elseif ($Exclude) {
+            $IgnoreHashTable = New-IgnoreHashTable $Exclude
+        }
+        Pop-Location
+    }
+    
     $ConfirmationMessage = New-ConfirmationMessage -EOL $EOL -WhatIf:$WhatIf.IsPresent
     $Decision = Request-Confirmation -Message $ConfirmationMessage -WhatIf:$WhatIf.IsPresent
 
@@ -89,63 +127,180 @@ function Import-GitIgnoreFile {
         [ValidateNotNullOrEmpty()]
         [string[]]$Path
     )
-    
+    # TODO: if $Exclude contains a .gitignore file (perhaps nested module repo) it needs to be ignored in this method 
     try {
-        Push-Location
-        if ($Path | Test-Path -PathType Container) {
-            $Path | Set-Location
-            $IgnoreFile = Get-ChildItem -Path . -Recurse -Depth 3 -Filter ".gitignore" | Select-Object -First 1
-        }
+        
+        $IgnoreFile = Get-ChildItem -Path . -Recurse -Depth 3 -Filter ".gitignore" | Select-Object -First 1
+        
+        # TODO: Import-GitIgnoreFile is only called for with path being a folder. Get-ParentItem 
+        # will be benefical if user drills into a specific dir but still needs the repo .gitignore
+        <#
         else {
-            $Path | Get-ItemPropertyValue -Name DirectoryName #| Set-Location
+            $Path | Get-ItemPropertyValue -Name DirectoryName
             $IgnoreFile = Get-ParentItem -Path $Path -Name '.gitignore' -Recurse
-        }
+        }#>
 
         $GitIgnoreContents = $IgnoreFile | `
             Get-Content | `
-            Where-Object {($_.Length -gt 0) -and ($_.StartsWith('#') -ne $true)}
-
-        $FolderEntries = @()
-        $FileEntries = @()
-
-        $GitIgnoreContents | ForEach-Object { 
-            # https://git-scm.com/docs/gitignore
-            if ($_ -match '\w/') {
-                # test to see which top-level folders exist
-                if (Join-Path -Path . -ChildPath $_ -Resolve -ErrorAction SilentlyContinue | Test-Path -PathType Container) {
-                    $FolderEntries += $_.Trim('/')
-                }
-            }
-            else {
-                # test to see which top-level files exist
-                if (Join-Path -Path . -ChildPath $_ -Resolve -ErrorAction SilentlyContinue | Test-Path -PathType Leaf) {
-                    # call Trim() here for element will be a string in quotes.
-                    $FileEntries += $_.Trim()
-                }
-            }
-        }
-
-        Pop-Location
-
-        # since .git folder is not listed in .gitignore, add it to FolderEntries
-        $FolderEntries += '.git'
-        
-        $IgnoreHashTable = @{
-            FolderEntries = $FolderEntries
-            FileEntries   = $FileEntries
-        }
+            Where-Object {($_ -match '\S+') -and ($_.StartsWith('#') -ne $true)}
 
         if ($IgnoreFile) {
             Write-Host ("Imported and will be using the following ignore file: " + $IgnoreFile.FullName)
         }
-        
-        $IgnoreHashTable
+
+        $GitIgnoreContents
     }
     catch {
 
     }
 }
 
+<#
+.SYNOPSIS
+Returns a valid path from a parent of one of its childs which overlaps that parent.
+
+.DESCRIPTION
+In set-theory this will be considered a relative complement of directories
+in ChildPath that are not in Path.
+
+A diagram to illustrate what is mentioned above:
+    A =        C:\Windows\diagnostics\system
+    B =                 .\diagnostics\system\Keyboard\en-US\CL_LocalizationData.psd1
+    B\A =                                  .\Keyboard\en-US\CL_LocalizationData.psd1
+    R =        C:\Windows\diagnostics\system\Keyboard\en-US\CL_LocalizationData.psd1
+
+The path 'R' is what will be returned if -PassThru is not switched otherwise $true 
+will be returned.
+
+.PARAMETER Path
+Parent path of $ChildPath.  This can be relative.
+
+.PARAMETER ChildPath
+Child path of $Path.
+
+.PARAMETER PassThru
+Ideal if the results are going to be piped into a function, perhaps Test-Path.  Because if
+no successful match it will throw an error in Test-Path.  But Test-Path can have its 
+-ErrorAction set to SilentlyContinue.
+
+.EXAMPLE
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg | Test-Path
+True
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reesources\android\AiT-Feature.jpg | Test-Path
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reesources\android\AiT-Feature.jpg -PassThru | Test-Path
+False
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg
+E:\Temp\AIT\resources\android\AiT-Feature.jpg
+
+.NOTES
+https://gist.github.com/marckassay/2f54ae68779c9f27fd130b193374335c
+#>
+<#
+function Get-MergedPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    [OutputType([bool])]
+    Param
+    (
+        [Parameter(Mandatory = $true,
+            Position = 0,
+            ValueFromPipeline = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Path,
+
+        [Parameter(Mandatory = $true,
+            Position = 1,
+            ValueFromPipeline = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$ChildPath,
+
+        [switch]
+        $PassThru
+    )
+
+    if ($Path -eq '.') {
+        $Path = Get-Location
+    }
+    $ParentBaseName = Get-Item $Path | Get-ItemPropertyValue -Name BaseName
+    $ChildBaseName = Split-Path -Path $ChildPath
+
+    if ($ChildBaseName.replace('\', '\\') -match $ParentBaseName ) {
+        Join-Path $Path -ChildPath $ChildPath.Split($ParentBaseName)[1]
+    }
+    else {
+        # if $PassThru has been switched, send 'o' to next piped function and
+        # most likely return a negative.
+        if ($PassThru.IsPresent) {"o"}
+    }
+}
+#>
+function New-IgnoreHashTable {
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $true,
+            ValueFromPipeline = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Contents
+    )
+
+    # since .git folder is not listed in .gitignore, add it to FolderEntries
+    $Contents += '.git/'
+    $FolderEntries = @()
+    $FileEntries = @()
+    Write-Verbose ("Starting to parse excluded items")
+    $Contents | ForEach-Object {
+        # global - if matches '*.html'
+        if (($_ -match '(?<=\*)[\~\-\.\w]+') -or ($_ -match '(?<!\*)[\~\-\.\w]+(?=\*)')) {
+            Write-Verbose ("  Determined the following is global file: " + $_)
+            $FileEntries += $_
+        }
+        # relative - if matches '.\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html'
+        # -or
+        # relative - log.txt | LICENSE | .gitignore | main.test.ts
+        elseif ($_ -match '(?<=^)[\~\-\.\w]+(?=$)') {
+            if (Test-Path $_ -PathType Leaf -ErrorAction SilentlyContinue) {
+                Write-Verbose ("  Determined the following is relative file: " + $_)
+                $FileEntries += $_
+            }
+        }
+        elseif ($_ -match '(?<=\\)[\~\-\.\w]+[.?\w]+') {
+            if (Test-Path $_ -PathType Leaf -ErrorAction SilentlyContinue) {
+                Write-Verbose ("  Determined the following is relative file: " + $_)
+                $FileEntries += $Matches.Values
+            }
+            elseif (Test-Path $_ -PathType Container -ErrorAction SilentlyContinue) {
+                Write-Verbose ("  Determined the following is relative folder: " + $_)
+                $FolderEntries += $Matches.Values
+            }
+        }
+        # relative - if matches 'out/**' | '.vscode/**'
+        # -or
+        # relative - .\resources\ | .\.vscode\ | .vscode/
+        elseif (($_ -match '\.?[\~\-\.\w]+(?=(?:\\|\/)\*{0,2})') -or ($_ -match '(?<=\\)\.?[\~\-\.\w]+[.?\w]+(?=\\)')) {
+            if (Test-Path $_ -PathType Container -ErrorAction SilentlyContinue) {
+                Write-Verbose ("  Determined the following is relative folder: " + $_)
+                $FolderEntries += $_
+            }
+        }
+        # global - if matches '**\tests' | '**/tests'
+        elseif ($_ -match '(?<=\* {2}(?:\\|\/))[\~\-\.\w]+') {
+            Write-Verbose ("  Determined the following is global folder: " + $_)
+            $FolderEntries += $_
+        }
+        else {
+            Write-Verbose ("  Undetermined item: " + $_)
+        }
+    }
+    Write-Verbose ("Finished parsing excluded items")
+
+    $IgnoreHashTable = @{
+        FolderEntries = $FolderEntries
+        FileEntries   = $FileEntries
+    }
+    $IgnoreHashTable
+}
+<#
 function Get-ParentItem {
     [CmdletBinding()]
     Param
@@ -176,7 +331,7 @@ function Get-ParentItem {
         $FoundItem
     }
 }
-
+#>
 function New-ConfirmationMessage {
     [CmdletBinding()]
     Param
@@ -252,12 +407,6 @@ function Start-ConversionProcess {
     )
     
     try {
-        # TODO: report ignored items?
-        <# 
-        $IgnoreHashTable.FolderEntries | ForEach-Object {
-            $ReportCollection += $_
-        } 
-        #>
         $script:ReportCollection = @()
 
         Push-Location
@@ -536,7 +685,7 @@ function Write-File {
                 }
             }
             elseif ($Data.EOL -eq 'CRLF') {
-                $Data.FileContent = $Data.FileContent -replace "`r`n", ""
+                $Data.FileContent = $Data.FileContent -replace "`n", "`r`n"
                 if ($Data.EndsWithEmptyNewLine) {
                     $Data.FileContent + "`r`n"
                 }
