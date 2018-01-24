@@ -1,6 +1,59 @@
 $script:SUT = $false
 $script:ReportCollection
+<#
+.SYNOPSIS
+Converts UTF-8 encoded files with CRLF end-of-line markings to LF markings
 
+.DESCRIPTION
+With the given -Path, this function will look for a .gitignore file for exclusion unless
+specified by the -SkipIgnoreFile switch.  With this ignore file you can add additional 
+items using the -Exclude parameter. There are limitations with nested items being excluded,
+see Examples for more info.
+
+If a .gitignore file is found it will output in the console before the console prompts you
+to proceed with conversion.  If the -WhatIf is switched, it will perform the same operations
+as if it wasn't except the writing operation with the file.
+
+After conversion operation, the report will output in the console.  The -ExportReportData 
+switch is an alternative to the report mentioned.
+
+.PARAMETER Path
+Ideally the location of the repository (.git folder).  But it can be any folder too, just 
+haven't tested in those circumstances much.
+
+.PARAMETER Exclude
+To exclude files or folders.  This can be used in addition to this function using the .gitignore
+file or without it.  Exclusion of .gitignore file use -SkipIgnoreFile switch.
+
+.PARAMETER SkipIgnoreFile
+Skips seeking and import of .gitignore file.
+
+.PARAMETER ExportReportData
+For every file it opens, regardless if its written too, will be included in this output if switched 
+
+.PARAMETER WhatIf
+Will do the same operations as if not switched except writing to the file.
+
+.EXAMPLE
+The path being used in this example will, assume that there is a .gitignore in it or depth or two below.
+
+ConvertTo-LF C:\repos\sots -WhatIf
+
+.EXAMPLE
+If the repo has a .gitignore file, skip it and just exclude the 'modules' folder that is specified in 
+-Exclude parameter.
+
+ConvertTo-LF C:\repos\sots -Exclude .\modules\ -SkipIgnoreFile -WhatIf
+
+.EXAMPLE
+Having the -Verbose switched it will continue the parsing a .gitignore file it there is one, and will 
+prompt before proceeding to convert files.
+
+ConvertTo-LF C:\repos\sots -Verbose
+
+.NOTES
+General notes
+#>
 function ConvertTo-LF {
     [CmdletBinding()]
     Param
@@ -28,6 +81,60 @@ function ConvertTo-LF {
         -WhatIf:$WhatIf.IsPresent
 }
 
+<#
+.SYNOPSIS
+Converts UTF-8 encoded files with LF end-of-line markings to CRLF markings
+
+.DESCRIPTION
+With the given -Path, this function will look for a .gitignore file for exclusion unless
+specified by the -SkipIgnoreFile switch.  With this ignore file you can add additional 
+items using the -Exclude parameter. There are limitations with nested items being excluded,
+see Examples for more info.
+
+If a .gitignore file is found it will output in the console before the console prompts you
+to proceed with conversion.  If the -WhatIf is switched, it will perform the same operations
+as if it wasn't except the writing operation with the file.
+
+After conversion operation, the report will output in the console.  The -ExportReportData 
+switch is an alternative to the report mentioned.
+
+.PARAMETER Path
+Ideally the location of the repository (.git folder).  But it can be any folder too, just 
+haven't tested in those circumstances much.
+
+.PARAMETER Exclude
+To exclude files or folders.  This can be used in addition to this function using the .gitignore
+file or without it.  Exclusion of .gitignore file use -SkipIgnoreFile switch.
+
+.PARAMETER SkipIgnoreFile
+Skips seeking and import of .gitignore file.
+
+.PARAMETER ExportReportData
+For every file it opens, regardless if its written too, will be included in this output if switched 
+
+.PARAMETER WhatIf
+Will do the same operations as if not switched except writing to the file.
+
+.EXAMPLE
+The path being used in this example will, assume that there is a .gitignore in it or depth or two below.
+
+ConvertTo-CRLF C:\repos\sots -WhatIf
+
+.EXAMPLE
+If the repo has a .gitignore file, skip it and just exclude the 'modules' folder that is specified in 
+-Exclude parameter.
+
+ConvertTo-CRLF C:\repos\sots -Exclude .\modules\ -SkipIgnoreFile -WhatIf
+
+.EXAMPLE
+Having the -Verbose switched it will continue the parsing a .gitignore file it there is one, and will 
+prompt before proceeding to convert files.
+
+ConvertTo-CRLF C:\repos\sots -Verbose
+
+.NOTES
+General notes
+#>
 function ConvertTo-CRLF {
     [CmdletBinding()]
     Param
@@ -157,10 +264,10 @@ function Import-GitIgnoreFile {
 
 <#
 .SYNOPSIS
-Returns a valid path from a parent of one of its childs which overlaps that parent.
+Returns a valid path from a parent of one of its children which overlaps that parent's path.
 
 .DESCRIPTION
-In set-theory this will be considered a relative complement of directories
+In set-theory this will be considered a relative complement.  That is the directories
 in ChildPath that are not in Path.
 
 A diagram to illustrate what is mentioned above:
@@ -169,7 +276,7 @@ A diagram to illustrate what is mentioned above:
     B\A =                                  .\Keyboard\en-US\CL_LocalizationData.psd1
     R =        C:\Windows\diagnostics\system\Keyboard\en-US\CL_LocalizationData.psd1
 
-The path 'R' is what will be returned if -PassThru is not switched otherwise $true 
+The path 'R' is what will be returned if -IsValid is not switched otherwise $true 
 will be returned.
 
 .PARAMETER Path
@@ -178,24 +285,29 @@ Parent path of $ChildPath.  This can be relative.
 .PARAMETER ChildPath
 Child path of $Path.
 
-.PARAMETER PassThru
-Ideal if the results are going to be piped into a function, perhaps Test-Path.  Because if
-no successful match it will throw an error in Test-Path.  But Test-Path can have its 
--ErrorAction set to SilentlyContinue.
+.PARAMETER IsValid
+Returns true if function found a complement folder.  False is returned if no complement was
+found.
 
 .EXAMPLE
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg | Test-Path
-True
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reesources\android\AiT-Feature.jpg | Test-Path
-E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reesources\android\AiT-Feature.jpg -PassThru | Test-Path
-False
+Demonstration of using Get-MergedPath with truthly values
+
 E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg
 E:\Temp\AIT\resources\android\AiT-Feature.jpg
 
-.NOTES
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\resources\android\AiT-Feature.jpg -IsValid
+True
+
+.EXAMPLE
+Demonstration of using Get-MergedPath with falsely values
+
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reWWWources\android\AiT-Feature.jpg
+E:\Temp\AIT> Get-MergedPath E:\Temp\AIT\resources\ -ChildPath .\reWWWources\android\AiT-Feature.jpg -IsValid
+False
+
+.LINK
 https://gist.github.com/marckassay/2f54ae68779c9f27fd130b193374335c
 #>
-<#
 function Get-MergedPath {
     [CmdletBinding()]
     [OutputType([string])]
@@ -214,26 +326,28 @@ function Get-MergedPath {
         [ValidateNotNullOrEmpty()]
         [string[]]$ChildPath,
 
-        [switch]
-        $PassThru
+        [switch]$IsValid
     )
 
-    if ($Path -eq '.') {
-        $Path = Get-Location
-    }
     $ParentBaseName = Get-Item $Path | Get-ItemPropertyValue -Name BaseName
     $ChildBaseName = Split-Path -Path $ChildPath
 
     if ($ChildBaseName.replace('\', '\\') -match $ParentBaseName ) {
-        Join-Path $Path -ChildPath $ChildPath.Split($ParentBaseName)[1]
+        if ($IsValid.IsPresent) {
+            $true
+        }
+        else {
+            Join-Path $Path -ChildPath $($ChildPath.Split($ParentBaseName)[1])
+        }
+        
     }
     else {
-        # if $PassThru has been switched, send 'o' to next piped function and
-        # most likely return a negative.
-        if ($PassThru.IsPresent) {"o"}
+        if ($IsValid.IsPresent) {
+            $false
+        }
     }
 }
-#>
+
 function New-IgnoreHashTable {
     [CmdletBinding()]
     Param
@@ -248,15 +362,15 @@ function New-IgnoreHashTable {
     $Contents += '.git/'
     $FolderEntries = @()
     $FileEntries = @()
+    
     Write-Verbose ("Starting to parse excluded items")
+
     $Contents | ForEach-Object {
         # global - if matches '*.html'
         if (($_ -match '(?<=\*)[\~\-\.\w]+') -or ($_ -match '(?<!\*)[\~\-\.\w]+(?=\*)')) {
             Write-Verbose ("  Determined the following is global file: " + $_)
             $FileEntries += $_
         }
-        # relative - if matches '.\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html'
-        # -or
         # relative - log.txt | LICENSE | .gitignore | main.test.ts
         elseif ($_ -match '(?<=^)[\~\-\.\w]+(?=$)') {
             if (Test-Path $_ -PathType Leaf -ErrorAction SilentlyContinue) {
@@ -264,6 +378,7 @@ function New-IgnoreHashTable {
                 $FileEntries += $_
             }
         }
+        # relative - if matches '.\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html'
         elseif ($_ -match '(?<=\\)[\~\-\.\w]+[.?\w]+') {
             if (Test-Path $_ -PathType Leaf -ErrorAction SilentlyContinue) {
                 Write-Verbose ("  Determined the following is relative file: " + $_)
@@ -300,7 +415,57 @@ function New-IgnoreHashTable {
     }
     $IgnoreHashTable
 }
+
 <#
+.SYNOPSIS
+Similarly to Get-ChildItem, this function can recurse the -Path parameter parent or parents
+for a file or folder
+
+.DESCRIPTION
+Long description
+
+.PARAMETER Path
+The path to start
+
+.PARAMETER Name
+The name of the item to seek for.  Must include extention of file.
+
+.PARAMETER Recurse
+If not switched, it will only look at the directory above -Path.
+
+.PARAMETER File
+Seems to be ineffective
+
+.PARAMETER Directory
+Seems to be ineffective
+
+.PARAMETER Force
+Seems to be ineffective
+
+.EXAMPLE
+Using this function piped with Test-Path
+
+E:\> Get-ParentItem E:\Temp\AIT\src\pages\  -Name '.gitignore'  -Verbose -Recurse | Test-Path -PathType Leaf
+VERBOSE: Starting with: E:\Temp\AIT\src\pages\
+VERBOSE:   CurrentDirectory var is: E:\Temp\AIT\src\pages\
+VERBOSE:   Found item, if there is one:
+VERBOSE:   Recursing function with: E:\Temp\AIT\src
+VERBOSE: Starting with: E:\Temp\AIT\src
+VERBOSE:   CurrentDirectory var is: E:\Temp\AIT\src
+VERBOSE:   Found item, if there is one:
+VERBOSE:   Recursing function with: E:\Temp\AIT
+VERBOSE: Starting with: E:\Temp\AIT
+VERBOSE:   CurrentDirectory var is: E:\Temp\AIT
+VERBOSE:   Found item, if there is one: .gitignore
+True
+E:\>
+
+.LINK
+https://gist.github.com/marckassay/76a7560e7c7f9b320fb3aa12e663631b
+
+.NOTES
+General notes
+#>
 function Get-ParentItem {
     [CmdletBinding()]
     Param
@@ -313,25 +478,37 @@ function Get-ParentItem {
         [ValidateNotNullOrEmpty()]
         [string]$Name,
 
-        [switch]$Recurse
+        [switch]$Recurse,
+        [switch]$File,
+        [switch]$Directory,
+        [switch]$Force
     )
 
+    Write-Verbose ("Starting with: $Path")
     if ($Path | Test-Path -PathType Leaf) {
+        Write-Verbose ("  this is a leaf, getting its directory name...")
         $Path = $Path | Get-ItemPropertyValue -Name DirectoryName
+        Write-Verbose ("  now using: $Path")
     }
-
-    $CurrentDirectory = $(Get-Item $Path)
     
-    $FoundItem = Get-ChildItem -Path $CurrentDirectory -Filter $Name
-
+    $CurrentDirectory = $(Get-Item $Path)
+    Write-Verbose ("  CurrentDirectory var is: $CurrentDirectory")
+    $FoundItem = Get-ChildItem -Path $CurrentDirectory `
+        -Filter $Name `
+        -File:$File.IsPresent `
+        -Directory:$Directory.IsPresent `
+        -Force:$Force.IsPresent
+    Write-Verbose ("  Found item, if there is one: $FoundItem")
+    
     if (($Recurse.IsPresent -eq $true) -and ($FoundItem -eq $null) -and ($CurrentDirectory.Parent.FullName -ne $null)) {
+        Write-Verbose ("  Recursing function with: " + $CurrentDirectory.Parent.FullName)
         Get-ParentItem -Path $CurrentDirectory.Parent.FullName -Name $Name -Recurse
     }
     else {
         $FoundItem
     }
 }
-#>
+
 function New-ConfirmationMessage {
     [CmdletBinding()]
     Param
