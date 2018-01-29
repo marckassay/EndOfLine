@@ -300,29 +300,30 @@ function New-IgnoreHashTable {
             }
             elseif (Test-Path $_ -PathType Container -ErrorAction SilentlyContinue) {
                 Write-Verbose ("  Determined the following is relative folder: " + $_)
-                $FolderEntries += $Matches.Values
+                $FolderEntries += $Matches.Values.TrimEnd('/')
             }
         }
         # relative - if matches 'out/**' | '.vscode/**'
         # -or
         # relative - .\resources\ | .\.vscode\ | .vscode/
         elseif (($_ -match '\.?[\~\-\.\w]+(?=(?:\\|\/)\*{0,2})') -or ($_ -match '(?<=\\)\.?[\~\-\.\w]+[.?\w]+(?=\\)')) {
+            $EntryCandidate = $_.TrimEnd('**').TrimEnd('/')
             if (Test-Path $_ -PathType Container -ErrorAction SilentlyContinue) {
                 Write-Verbose ("  Determined the following is relative folder: " + $_)
-                $FolderEntries += $_
+                $FolderEntries += $EntryCandidate
             }
         }
         # global - if matches '**\tests' | '**/tests'
         elseif ($_ -match '(?<=\* {2}(?:\\|\/))[\~\-\.\w]+') {
             Write-Verbose ("  Determined the following is global folder: " + $_)
-            $FolderEntries += $_
+            $FolderEntries += $_.TrimEnd('/')
         }
         else {
             Write-Verbose ("  Undetermined item: " + $_)
         }
     }
     Write-Verbose ("Finished parsing excluded items")
-
+    
     $IgnoreHashTable = @{
         FolderEntries = $FolderEntries
         FileEntries   = $FileEntries
@@ -485,6 +486,7 @@ function Invoke-RecurseFolders {
     # seems to be fixed in PowerShell Core 6.0.0
     #
     # https://github.com/PowerShell/PowerShell/issues/5699
+    # https://github.com/PowerShell/PowerShell/pull/5896
     #
     [string[]]$Files = Get-ChildItem . -Exclude $IgnoreHashTable.FileEntries | Where-Object {$_.PSIsContainer -eq $false}
     ForEach ($File in $Files) {
@@ -495,8 +497,11 @@ function Invoke-RecurseFolders {
             Write-File | `
             Out-ReportData
     }
-
-    [string[]]$Folders = Get-ChildItem . -Directory -Exclude $IgnoreHashTable.FolderEntries
+    # TODO: https://github.com/marckassay/EndOfLine/issues/2
+    # For this issue, take subpaths only, and check to see if we 
+    # are at base directory.  If so, extract that base directory 
+    # name and replace its entry in $IgnoreHashTable.FolderEntries 
+    [string[]]$Folders = Get-ChildItem . -Exclude $IgnoreHashTable.FolderEntries | Where-Object {$_.PSIsContainer -eq $true}
     ForEach ($Folder in $Folders) {
         Invoke-RecurseFolders -Path $Folder `
             -EOL $EOL `
