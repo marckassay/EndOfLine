@@ -510,18 +510,20 @@ function Invoke-RecurseFolders {
     }
 
     $RevisedFolderEntries = @()
-    $IgnoreHashTable.FolderEntries | Foreach-Object {
-        # this 'if' are for subpaths only, and check to see if we 
-        # are at base directory.  If so, extract that base directory 
-        # name and add in $RevisedFolderEntries 
-        if ($_ -match '[\~\-\.\w]+[\\|\/][\~\-\.\w]+') {
-            $($_ -match '[\~\-\.\w]+$') | Out-Null
-            if (Test-Path $Matches[0]) {
-                $RevisedFolderEntries += $Matches[0]
+    if ($IgnoreHashTable.FolderEntries.Length) {
+        $IgnoreHashTable.FolderEntries | Foreach-Object {
+            # this 'if' are for subpaths only, and check to see if we 
+            # are at base directory.  If so, extract that base directory 
+            # name and add in $RevisedFolderEntries 
+            if ($_ -match '[\~\-\.\w]+[\\|\/][\~\-\.\w]+') {
+                $($_ -match '[\~\-\.\w]+$') | Out-Null
+                if (Test-Path $Matches[0]) {
+                    $RevisedFolderEntries += $Matches[0]
+                }
             }
-        }
-        elseif (Test-Path $_) {
-            $RevisedFolderEntries += $_
+            elseif (Test-Path $_) {
+                $RevisedFolderEntries += $_
+            }
         }
     }
 

@@ -12,9 +12,8 @@ Objective of this module is conversion of end-of-line (EOL) characters in UTF-8 
 
 ## Caveat
 
-* At first, use the -WhatIf switch parameter to see what files will be modified.
+* Please use the `WhatIf` switch parameter to perform a 'dry-run' on what files will be modified.
 * Files are expected to be encoded in UTF-8.  If encoded in anything else it will not be modified.
-* There is a limitation of exclusion of items.   This module recurses a function that uses `Get-ChildItems` with its `Exclude` parameter.  Excluded items that get passed to `Exclude` must have the value the name (eg: log.txt, *.txt) only.  As-is the code will not recongize exlcuded items by sub path.
 
 ## Instructions
 
