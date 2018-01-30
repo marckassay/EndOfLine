@@ -187,6 +187,9 @@ function Convert-EOL {
 
     if ($Path | Test-Path -PathType Container) {
         Push-Location
+        if ($Path -eq '.') {
+            $Path = Resolve-Path '.'
+        }
         $Path | Set-Location
 
         if (($SkipIgnoreFile.IsPresent -eq $false) -and (!$Exclude)) {
@@ -303,12 +306,20 @@ function New-IgnoreHashTable {
                 $FolderEntries += $Matches.Values.TrimEnd('/')
             }
         }
-        # relative - if matches 'out/**' | '.vscode/**'
+        # relative - if matches 'out/**' | '.vscode/**' | out/www/**
         # -or
         # relative - .\resources\ | .\.vscode\ | .vscode/
-        elseif (($_ -match '\.?[\~\-\.\w]+(?=(?:\\|\/)\*{0,2})') -or ($_ -match '(?<=\\)\.?[\~\-\.\w]+[.?\w]+(?=\\)')) {
+        elseif (($_ -match '\.?[(\\|\/)\~\-\.\w]+(?=(?:\\|\/)\*{0,2})') -or ($_ -match '(?<=\\)\.?[\~\-\.\w]+[.?\w]+(?=\\)')) {
             $EntryCandidate = $_.TrimEnd('**').TrimEnd('/')
-            if (Test-Path $_ -PathType Container -ErrorAction SilentlyContinue) {
+            # is this a sub-path entry?
+            if ($_ -match '[\~\-\.\w]+[\\|\/][\~\-\.\w]+') {
+                # if so does it exist?
+                if (Test-Path $EntryCandidate -PathType Container -ErrorAction SilentlyContinue) {
+                    Write-Verbose ("  Determined the following is a subpath folder: " + $_)
+                    $FolderEntries += $EntryCandidate
+                }
+            }
+            elseif (Test-Path $EntryCandidate -PathType Container -ErrorAction SilentlyContinue) {
                 Write-Verbose ("  Determined the following is relative folder: " + $_)
                 $FolderEntries += $EntryCandidate
             }
@@ -497,11 +508,24 @@ function Invoke-RecurseFolders {
             Write-File | `
             Out-ReportData
     }
-    # TODO: https://github.com/marckassay/EndOfLine/issues/2
-    # For this issue, take subpaths only, and check to see if we 
-    # are at base directory.  If so, extract that base directory 
-    # name and replace its entry in $IgnoreHashTable.FolderEntries 
-    [string[]]$Folders = Get-ChildItem . -Exclude $IgnoreHashTable.FolderEntries | Where-Object {$_.PSIsContainer -eq $true}
+
+    $RevisedFolderEntries = @()
+    $IgnoreHashTable.FolderEntries | Foreach-Object {
+        # this 'if' are for subpaths only, and check to see if we 
+        # are at base directory.  If so, extract that base directory 
+        # name and add in $RevisedFolderEntries 
+        if ($_ -match '[\~\-\.\w]+[\\|\/][\~\-\.\w]+') {
+            $($_ -match '[\~\-\.\w]+$') | Out-Null
+            if (Test-Path $Matches[0]) {
+                $RevisedFolderEntries += $Matches[0]
+            }
+        }
+        elseif (Test-Path $_) {
+            $RevisedFolderEntries += $_
+        }
+    }
+
+    [string[]]$Folders = Get-ChildItem . -Exclude $RevisedFolderEntries | Where-Object {$_.PSIsContainer -eq $true}
     ForEach ($Folder in $Folders) {
         Invoke-RecurseFolders -Path $Folder `
             -EOL $EOL `
