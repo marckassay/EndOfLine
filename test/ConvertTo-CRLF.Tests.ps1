@@ -2,12 +2,14 @@ Import-Module -Name $PSScriptRoot\resource\Get-Bytes -Verbose -Force
 Import-Module -Name $PSScriptRoot\..\EndOfLine -Verbose -Force
 
 Describe "Test ConvertTo-CRLF" {
+    BeforeAll {
+        # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
+        Copy-Item -Path "resource\index-UTF8-LF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
+    }
+
     Context "with UTF-8 LF file" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\index-UTF8-LF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
         
             It "Should of added Unicode 13dec chracters" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF8-LF-NoBOM-NoXtraLine.html"; `

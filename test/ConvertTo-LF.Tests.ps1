@@ -2,13 +2,23 @@ Import-Module -Name $PSScriptRoot\resource\Get-Bytes -Verbose -Force
 Import-Module -Name $PSScriptRoot\..\EndOfLine -Verbose -Force
 
 Describe "Test ConvertTo-LF" {
+    BeforeAll {
+        # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
+        Copy-Item -Path "resource\.gitignore.test" -Destination "TestDrive:\"
+        Rename-Item -Path "TestDrive:\.gitignore.test" -NewName ".gitignore"
+
+        Copy-Item -Path "resource\index-UTF8-LF-BOM-NoXtraLine.html" -Destination "TestDrive:\"
+        Copy-Item -Path "resource\index-UTF8-LF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
+        Copy-Item -Path "resource\index-UTF8-CRLF-NoBOM-XtraLine.html" -Destination "TestDrive:\"
+        Copy-Item -Path "resource\index-UTF8-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
+        Copy-Item -Path "resource\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
+        Copy-Item -Path "resource\index-UTF16LE-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
+    }
+
     Context "with UTF-8 CRLF file" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\index-UTF8-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-        
+            
             It "Should of removed Unicode 13dec chracters" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF8-CRLF-NoBOM-NoXtraLine.html"; `
                         SkipIgnoreFile   = $true; `
@@ -39,10 +49,7 @@ Describe "Test ConvertTo-LF" {
     Context "with UTF-8 CRLF file in 'WhatIf' mode" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\index-UTF8-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-        
+
             It "Should of not modified file - WhatIf mode" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF8-CRLF-NoBOM-NoXtraLine.html"; `
                         SkipIgnoreFile   = $true; `
@@ -63,10 +70,7 @@ Describe "Test ConvertTo-LF" {
     Context "with UTF-8 CRLF with extra line file" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\index-UTF8-CRLF-NoBOM-XtraLine.html" -Destination "TestDrive:\"
-        
+
             It "Should of removed Unicode 13dec chracters and preserved extra line at end" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF8-CRLF-NoBOM-XtraLine.html"; `
                         SkipIgnoreFile   = $true; `
@@ -99,14 +103,7 @@ Describe "Test ConvertTo-LF" {
     Context "with directory with .gitignore file" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\.gitignore" -Destination "TestDrive:\"
-            # load various files
-            Copy-Item -Path "resource\index-UTF8-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-            Copy-Item -Path "resource\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-            Copy-Item -Path "resource\index-UTF16LE-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-        
+
             It "Should of not modified file - listed in .gitignore file" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF8-CRLF-NoBOM-NoXtraLine.html"; `
                         SkipIgnoreFile   = $false; `
@@ -129,11 +126,7 @@ Describe "Test ConvertTo-LF" {
     Context "with UTF-8 LF files" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\index-UTF8-LF-BOM-NoXtraLine.html" -Destination "TestDrive:\"
-            Copy-Item -Path "resource\index-UTF8-LF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-        
+
             It "Should of not modified file - same EOL as requested" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF8-LF-NoBOM-NoXtraLine.html"; `
                         SkipIgnoreFile   = $true; `
@@ -160,10 +153,6 @@ Describe "Test ConvertTo-LF" {
     Context "with UTF-16 files" {
         InModuleScope EndOfLine {
             $script:SUT = $true
-        
-            # Using Pester's TestDrive: https://github.com/pester/Pester/wiki/TestDrive
-            Copy-Item -Path "resource\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
-            Copy-Item -Path "resource\index-UTF16LE-CRLF-NoBOM-NoXtraLine.html" -Destination "TestDrive:\"
         
             It "Should of not modified file - not UTF-8 encoded file" -TestCases @(
                 @{  Path                 = "TestDrive:\index-UTF16BE-CRLF-NoBOM-NoXtraLine.html"; `
