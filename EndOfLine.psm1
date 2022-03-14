@@ -329,6 +329,17 @@ function New-IgnoreHashTable {
             Write-Verbose ("  Determined the following is global folder: " + $_)
             $FolderEntries += $_.TrimEnd('/')
         }
+        # relative - if matches '/node_modules'
+        elseif($_ -match '^\/[\~\-\.\w]+$') {
+            if (Test-Path $_.TrimStart('/') -PathType Leaf -ErrorAction SilentlyContinue) {
+                Write-Verbose ("  Determined the following is relative file: " + $_)
+                $FileEntries += $_.TrimStart('/')
+            }
+            elseif (Test-Path $_.TrimStart('/') -PathType Container -ErrorAction SilentlyContinue) {
+                Write-Verbose ("  Determined the following is relative folder: " + $_)
+                $FolderEntries += $_.TrimStart('/')
+            }
+        }
         else {
             Write-Verbose ("  Undetermined item: " + $_)
         }
